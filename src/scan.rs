@@ -155,19 +155,32 @@ pub fn virtual_rect() -> RectI {
     }
 }
 
-/// True when the foreground window is a borderless full-screen app (game, video, presentation).
+/// True when a game or another full-screen app is in front: Windows itself says so (exclusive
+/// Direct3D full screen, presentation mode, a full-screen app that wants no interruptions), or
+/// the foreground window covers a whole monitor, taskbar included. Many games keep the title
+/// bar style bits in "borderless window" mode, so the style is not checked; a maximized window
+/// is not full screen even when an auto-hidden taskbar lets it cover the monitor.
 pub fn foreground_fullscreen(mons: &[Monitor]) -> bool {
+    use windows::Win32::UI::Shell::{
+        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
+    };
     unsafe {
+        if let Ok(state) = SHQueryUserNotificationState() {
+            if state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE || state == QUNS_BUSY {
+                return true;
+            }
+        }
         let fg = GetForegroundWindow();
         if fg.is_invalid() {
             return false;
         }
+        let root = GetAncestor(fg, GA_ROOT);
+        let fg = if root.is_invalid() { fg } else { root };
         let cls = class_name(fg);
         if SKIP_CLASSES.contains(&cls.as_str()) {
             return false;
         }
-        let style = GetWindowLongW(fg, GWL_STYLE) as u32;
-        if style & WS_CAPTION.0 == WS_CAPTION.0 {
+        if IsZoomed(fg).as_bool() {
             return false;
         }
         let mut r = RECT::default();
