@@ -107,7 +107,6 @@ fn make_overlay(mtm: MainThreadMarker, screen: &NSScreen, primary_h: f64) -> Ove
     panel.setIgnoresMouseEvents(true);
     panel.setLevel(LEVEL);
     panel.setHidesOnDeactivate(false);
-    panel.setFloatingPanel(true);
     panel.setCollectionBehavior(
         NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::Stationary
@@ -134,7 +133,7 @@ fn make_overlays(mtm: MainThreadMarker) -> Vec<Overlay> {
     NSScreen::screens(mtm).iter().map(|s| make_overlay(mtm, &s, h)).collect()
 }
 
-fn make_renderer(overlays: &[Overlay]) -> Option<Renderer> {
+fn make_renderer(overlays: &[Overlay]) -> Result<Renderer, String> {
     let views: Vec<_> = overlays
         .iter()
         .map(|o| {
@@ -192,9 +191,12 @@ fn run(mtm: MainThreadMarker) {
     let mut mons = scan::monitors(mtm);
     let mut vr = scan::virtual_rect(&mons);
     let mut overlays = make_overlays(mtm);
-    let Some(mut renderer) = make_renderer(&overlays) else {
-        alert("no Metal device");
-        return;
+    let mut renderer = match make_renderer(&overlays) {
+        Ok(r) => r,
+        Err(e) => {
+            alert(&format!("cannot draw with Metal ({e})"));
+            return;
+        }
     };
     let tray = tray::Tray::new(mtm);
     tray.sync(&cfg);
@@ -276,8 +278,11 @@ fn run(mtm: MainThreadMarker) {
                 drop(renderer);
                 overlays = make_overlays(mtm);
                 renderer = match make_renderer(&overlays) {
-                    Some(r) => r,
-                    None => break,
+                    Ok(r) => r,
+                    Err(e) => {
+                        alert(&format!("cannot draw with Metal ({e})"));
+                        break;
+                    }
                 };
                 vr = scan::virtual_rect(&new_mons);
                 world.set_monitors(new_mons.clone(), vr);

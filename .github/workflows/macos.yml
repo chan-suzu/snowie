@@ -54,6 +54,7 @@ jobs:
           cd dist && ditto -c -k --keepParent Snowie.app Snowie-macos.zip
       - name: Smoke test with a screenshot
         run: |
+          system_profiler SPDisplaysDataType || true
           open ~ || true
           sleep 2
           SNOWIE_PRESNOW=1 dist/Snowie.app/Contents/MacOS/Snowie > snowie.log 2>&1 &
@@ -71,6 +72,35 @@ jobs:
         if: always()
         with:
           name: smoke-test
+          path: |
+            shot.png
+            snowie.log
+
+  # the same app on an Intel runner, which may expose a Metal device where the Apple Silicon VM does not
+  smoke-intel:
+    needs: build
+    runs-on: macos-13
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Snowie-macos
+      - name: Smoke test with a screenshot
+        run: |
+          ditto -x -k Snowie-macos.zip .
+          system_profiler SPDisplaysDataType || true
+          open ~ || true
+          sleep 2
+          SNOWIE_PRESNOW=1 Snowie.app/Contents/MacOS/Snowie > snowie.log 2>&1 &
+          PID=$!
+          sleep 12
+          screencapture -x shot.png || true
+          if kill -0 $PID 2>/dev/null; then echo "Snowie is running"; else echo "Snowie exited early"; fi
+          kill $PID 2>/dev/null || true
+          cat snowie.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-intel
           path: |
             shot.png
             snowie.log

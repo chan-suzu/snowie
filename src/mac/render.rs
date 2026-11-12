@@ -385,7 +385,7 @@ fn rgba(r: f32, g: f32, b: f32, a: f32) -> [f32; 4] {
 impl Renderer {
     /// `views` are the content views of the overlay panels: (NSView pointer, origin, size in
     /// points, pixels per point).
-    pub fn new(views: &[(NonNull<std::ffi::c_void>, V2, V2, f32)]) -> Option<Renderer> {
+    pub fn new(views: &[(NonNull<std::ffi::c_void>, V2, V2, f32)]) -> Result<Renderer, String> {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = wgpu::Backends::METAL;
         let instance = wgpu::Instance::new(desc);
@@ -398,7 +398,7 @@ impl Renderer {
                     raw_window_handle: handle,
                 })
             }
-            .ok()?;
+            .map_err(|e| format!("surface: {e}"))?;
             surfaces.push(surface);
         }
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -407,14 +407,20 @@ impl Renderer {
             force_fallback_adapter: false,
             apply_limit_buckets: false,
         }))
-        .ok()?;
+        .map_err(|e| format!("adapter: {e}"))?;
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor { label: Some("snowie"), ..Default::default() }),
         )
-        .ok()?;
-        let caps = surfaces.first()?.get_capabilities(&adapter);
+        .map_err(|e| format!("device: {e}"))?;
+        let caps = surfaces.first().ok_or("no screens")?.get_capabilities(&adapter);
         // a plain (non-sRGB) format: colours match the Direct2D version
-        let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).or_else(|| caps.formats.first().copied())?;
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| !f.is_srgb())
+            .or_else(|| caps.formats.first().copied())
+            .ok_or("no surface formats")?;
         let alpha_mode = [wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::PreMultiplied]
             .into_iter()
             .find(|m| caps.alpha_modes.contains(m))
@@ -613,7 +619,7 @@ impl Renderer {
             let t = r.target(surface, origin, size, scale);
             r.targets.push(t);
         }
-        Some(r)
+        Ok(r)
     }
 
     fn texture(&mut self, w: u32, h: u32, px: &[u8]) -> usize {
