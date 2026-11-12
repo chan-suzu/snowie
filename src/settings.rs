@@ -7,8 +7,6 @@ use crate::tray;
 use eframe::egui::{self, Align, Color32, CornerRadius, FontFamily, Layout, RichText, Stroke, Ui, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use windows::core::w;
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE};
 
 const TITLE: &str = "Snowie — настройки";
 
@@ -24,15 +22,31 @@ const ACCENT_DIM: Color32 = Color32::from_rgb(52, 105, 170);
 const TEXT: Color32 = Color32::from_rgb(222, 232, 250);
 const WEAK: Color32 = Color32::from_rgb(132, 150, 182);
 
-pub fn run() {
+/// Brings an already open settings window to the front. True if there was one.
+#[cfg(windows)]
+fn raise_existing() -> bool {
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE};
     unsafe {
         if let Ok(h) = FindWindowW(None, w!("Snowie — настройки")) {
             if !h.is_invalid() {
                 let _ = ShowWindow(h, SW_RESTORE);
                 let _ = SetForegroundWindow(h);
-                return;
+                return true;
             }
         }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn raise_existing() -> bool {
+    false
+}
+
+pub fn run() {
+    if raise_existing() {
+        return;
     }
     let icon = egui::IconData { rgba: tray::snowflake_rgba(32), width: 32, height: 32 };
     let options = eframe::NativeOptions {
@@ -79,7 +93,10 @@ struct SettingsApp {
 
 /// Segoe UI from Windows for text, Segoe UI Symbol for the icons; egui's own fonts stay as fallback.
 fn install_fonts(ctx: &egui::Context) {
+    #[cfg(windows)]
     let dir = std::path::Path::new(&std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into())).join("Fonts");
+    #[cfg(not(windows))]
+    let dir = std::path::Path::new("/System/Library/Fonts/Supplemental");
     let mut fonts = egui::FontDefinitions::default();
     let mut add = |name: &str, file: &str| -> bool {
         match std::fs::read(dir.join(file)) {
@@ -90,9 +107,14 @@ fn install_fonts(ctx: &egui::Context) {
             Err(_) => false,
         }
     };
-    let regular = add("segoe", "segoeui.ttf");
-    let semibold = add("segoe-semibold", "seguisb.ttf");
-    let symbols = add("segoe-symbol", "seguisym.ttf");
+    // (regular, semibold, symbols): Segoe UI on Windows, Arial and Apple Symbols on macOS
+    #[cfg(windows)]
+    let files = ("segoeui.ttf", "seguisb.ttf", "seguisym.ttf");
+    #[cfg(not(windows))]
+    let files = ("Arial.ttf", "Arial Bold.ttf", "../Apple Symbols.ttf");
+    let regular = add("segoe", files.0);
+    let semibold = add("segoe-semibold", files.1);
+    let symbols = add("segoe-symbol", files.2);
     let prop = fonts.families.entry(FontFamily::Proportional).or_default();
     let mut front = Vec::new();
     if regular {

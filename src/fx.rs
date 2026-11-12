@@ -2,7 +2,6 @@
 
 use crate::geom::V2;
 use std::f32::consts::{PI, TAU};
-use windows::Win32::System::SystemInformation::GetLocalTime;
 
 // ------------------------------------------------------------------ clock
 
@@ -28,10 +27,33 @@ fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     era * 146097 + doe - 719468
 }
 
+/// Local date and time: (year, month, day, hour, minute, second).
+#[cfg(windows)]
+fn local_time() -> (i32, u32, u32, u32, u32, u32) {
+    let st = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    (st.wYear as i32, st.wMonth as u32, st.wDay as u32, st.wHour as u32, st.wMinute as u32, st.wSecond as u32)
+}
+
+#[cfg(unix)]
+fn local_time() -> (i32, u32, u32, u32, u32, u32) {
+    // SAFETY: localtime_r only writes the struct we hand it
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        (
+            tm.tm_year + 1900,
+            tm.tm_mon as u32 + 1,
+            tm.tm_mday as u32,
+            tm.tm_hour as u32,
+            tm.tm_min as u32,
+            tm.tm_sec as u32,
+        )
+    }
+}
+
 pub fn local_clock() -> Clock {
-    let st = unsafe { GetLocalTime() };
-    let (y, mo, d) = (st.wYear as i32, st.wMonth as u32, st.wDay as u32);
-    let (h, mi, s) = (st.wHour as u32, st.wMinute as u32, st.wSecond as u32);
+    let (y, mo, d, h, mi, s) = local_time();
     let now = days_from_civil(y, mo, d) * 86400 + (h * 3600 + mi * 60 + s) as i64;
     let ny = days_from_civil(y + 1, 1, 1) * 86400;
     Clock { year: y, month: mo, day: d, hour: h, minute: mi, secs_to_ny: ny - now }

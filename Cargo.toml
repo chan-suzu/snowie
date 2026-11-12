@@ -3,10 +3,10 @@ name = "snowie"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.95"
-description = "Snow on your Windows desktop: drifts on windows and the taskbar, snowballs, snowmen, a snowplow and New Year fireworks"
+description = "Snow on your desktop (Windows and macOS): drifts on windows and the taskbar, snowballs, snowmen, a snowplow and New Year fireworks"
 license = "MIT"
 readme = "README.md"
-keywords = ["snow", "desktop", "windows", "overlay", "winter"]
+keywords = ["snow", "desktop", "windows", "macos", "overlay"]
 categories = ["games", "multimedia"]
 
 [dependencies]
@@ -15,9 +15,11 @@ fastrand = "2"
 png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+
+[target.'cfg(windows)'.dependencies]
 windows-numerics = "0.3"
 
-[dependencies.windows]
+[target.'cfg(windows)'.dependencies.windows]
 version = "0.62"
 features = [
     "Win32_Foundation",
@@ -44,6 +46,20 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+fontdue = "0.9.5"
+libc = "0.2.191"
+objc2 = "0.6.5"
+objc2-app-kit = "0.3.2"
+objc2-audio-toolbox = "0.3.2"
+objc2-core-audio-types = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-foundation = "0.3.2"
+pollster = "1.0.1"
+raw-window-handle = "0.6.2"
+wgpu = "30.0.2"
 
 [profile.release]
 opt-level = 3

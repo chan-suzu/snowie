@@ -586,6 +586,7 @@ impl World {
     }
 
     /// Fixed random seed, for reproducible benchmarks.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn seed(&mut self, seed: u64) {
         self.rng = fastrand::Rng::with_seed(seed);
     }
@@ -653,6 +654,7 @@ impl World {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn window_vel(&self, hwnd: isize) -> V2 {
         self.win_surf.get(&hwnd).map_or(V2::ZERO, |s| s.vel)
     }
@@ -943,6 +945,32 @@ impl World {
     }
 
     // ---------------------------------------------------------------- mouse
+
+    /// Would a press at `p` take something (snow, a ball, the fireworks box)? Lets an overlay
+    /// that cannot swallow clicks (macOS) catch the mouse only where there is something to take.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn hit(&self, p: V2) -> bool {
+        if !self.active {
+            return false;
+        }
+        let s = self.scale;
+        if let Some(b) = &self.firebox {
+            let r = RectI {
+                l: (b.pos.x - b.w / 2.0) as i32,
+                t: (b.pos.y - b.h) as i32,
+                r: (b.pos.x + b.w / 2.0) as i32,
+                b: b.pos.y as i32,
+            };
+            if r.contains_inflated(p, 4.0 * s) {
+                return true;
+            }
+        }
+        let on_stack = self
+            .stacks
+            .iter()
+            .any(|st| st.visible && st.centers.iter().zip(&st.balls).any(|(c, b)| (p - *c).len() <= b.r));
+        on_stack || self.hit_surface(p, 5.0 * s, 3.0 * s).is_some()
+    }
 
     /// Called from the mouse hook on left button down. Returns true if the click hit something
     /// of ours (the click is then swallowed).

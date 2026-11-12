@@ -4,6 +4,9 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/snowie.rc");
     println!("cargo:rerun-if-changed=assets/snowie.ico");
     println!("cargo:rerun-if-changed=assets/snowie.manifest");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
     if let Err(e) = embed_resource::compile("assets/snowie.rc", embed_resource::NONE).manifest_optional() {
         println!("cargo:warning=exe icon not embedded: {e}");
     }
