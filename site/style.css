@@ -280,9 +280,11 @@ code { background: #1a2748; padding: 2px 7px; border-radius: 6px; font-size: 0.9
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; text-align: left; padding-top: 10px; }
   .hero-art { order: -1; }
-  .tems { width: 280px; margin: 0 auto; }
-  .hero-art .tems { margin-left: 90px; }
-  .suzu { left: calc(50% - 175px); height: 86%; }
+  /* Tems and the gap for Suzu shrink with the screen, so the pair never gets wider than a phone */
+  .hero-art { --tw: min(280px, 60vw); --gap: min(90px, 22vw); }
+  .tems { width: var(--tw); margin: 0 auto; }
+  .hero-art .tems { margin-left: var(--gap); }
+  .suzu { left: calc(50% - (var(--tw) + var(--gap)) / 2); height: 86%; }
   .tems-hint { right: 4%; top: -6%; }
   .tems-hint::after { display: none; }
   .top nav a:not(.gh) { display: none; }
