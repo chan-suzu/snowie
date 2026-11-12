@@ -1341,6 +1341,12 @@ ${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2
     .map(el => ({ el, win: wins.find(w => w.el.dataset.title === el.dataset.win), seat: parseFloat(el.dataset.seat) || 0.54 }))
     .filter(s => s.win);
   function placeSitter() {
+    // sitters overlap each other in the same order as their windows: the one on the front
+    // window is drawn in front (both stay above the snow and under the demo buttons)
+    [...sitters].sort((a, b) => a.win.z - b.win.z).forEach((s, i) => {
+      const z = String(55 + Math.min(i, 4));
+      if (s.el.style.zIndex !== z) s.el.style.zIndex = z;
+    });
     for (const s of sitters) {
       const el = s.el, w = s.win;
       if (!el.naturalWidth) continue;
