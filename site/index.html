@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snowie — снег на рабочем столе</title>
+  <meta name="description" content="Snowie: снег поверх рабочего стола Windows. Сугробы на окнах, снежки, снеговики, снегоуборщик и новогодний салют.">
+  <meta property="og:title" content="Snowie — снег на рабочем столе">
+  <meta property="og:description" content="Сугробы на окнах, снежки, снеговики, снегоуборщик и новогодний салют. Бесплатно, с открытым кодом.">
+  <meta property="og:image" content="assets/og.png">
+  <link rel="icon" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <canvas id="sky" aria-hidden="true"></canvas>
+
+  <header class="top">
+    <a class="brand" href="#"><img src="assets/favicon.png" alt="" width="28" height="28"> Snowie</a>
+    <nav>
+      <a href="#demo">Демо</a>
+      <a href="#features">Возможности</a>
+      <a href="#install">Установка</a>
+      <a class="gh" data-repo-link href="#">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Для Windows 10 и 11 · бесплатно · открытый код</p>
+      <h1>Снег прямо<br>на рабочем столе</h1>
+      <p class="lead">Снежинки падают поверх окон и копятся сугробами на окнах и на панели задач. Из снега можно скатать снежок и запустить им в окно, слепить снеговика, а в новогоднюю ночь запустить салют.</p>
+      <div class="cta">
+        <a class="btn primary" data-release-link href="#">Скачать для Windows</a>
+        <a class="btn ghost" href="#demo">Попробовать здесь ↓</a>
+      </div>
+      <p class="tiny">Один файл, 11 МБ. Без установки и прав администратора.</p>
+    </div>
+    <div class="hero-art">
+      <img src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
+    </div>
+  </section>
+
+  <section id="demo" class="demo-section">
+    <div class="section-head">
+      <h2>Попробуйте прямо здесь</h2>
+      <p>Это маленький рабочий стол. Окна можно таскать, а со снегом делать всё то же, что в настоящем Snowie.</p>
+    </div>
+    <div class="hints">
+      <span><b>Зажмите</b> сугроб — возьмёте снег</span>
+      <span><b>Крутите</b> мышью по кругу — скатаете шар</span>
+      <span><b>Отпустите на ходу</b> — бросок</span>
+      <span><b>Три шара</b> друг на друга — снеговик</span>
+      <span><b>Потрясите</b> окно — снег слетит</span>
+    </div>
+    <div id="desk" class="desk">
+      <div class="win" data-title="Музыка" style="left:8%;top:150px;width:330px;height:210px">
+        <div class="bar"><span class="t">♫ Музыка</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
+        <div class="body player">
+          <div class="cover"></div>
+          <div class="meta"><b>Jingle Bells</b><span>J. Pierpont, 1857</span><div class="prog"><div></div></div></div>
+        </div>
+        <img class="sitter" src="assets/tems-sit.png" alt="Темс сидит на окне" width="150" height="150">
+      </div>
+      <div class="win" data-title="Блокнот" style="left:40%;top:230px;width:380px;height:220px">
+        <div class="bar"><span class="t">Блокнот — список.txt</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
+        <div class="body note">
+          <p>1. Купить мандарины 🍊</p>
+          <p>2. Нарядить ёлку</p>
+          <p>3. Слепить снеговика на рабочем столе</p>
+          <p>4. Не забыть салют в 00:00</p>
+        </div>
+      </div>
+      <div class="win" data-title="Проводник" style="left:63%;top:90px;width:300px;height:190px">
+        <div class="bar"><span class="t">📁 Новый год</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
+        <div class="body files">
+          <div><span class="ic">📁</span>Фото 2026</div>
+          <div><span class="ic">🎵</span>Плейлист.m3u</div>
+          <div><span class="ic">🎁</span>Подарки.xlsx</div>
+          <div><span class="ic">❄</span>snowie.exe</div>
+        </div>
+      </div>
+      <div class="taskbar">
+        <span class="start">❄</span>
+        <span class="app"></span><span class="app"></span><span class="app"></span>
+        <span class="clock" id="clock">00:00</span>
+      </div>
+      <canvas id="snow"></canvas>
+      <div class="desk-tools">
+        <button data-act="fill">Насыпать снега</button>
+        <button data-act="salute">Салют</button>
+        <button data-act="plow">Снегоуборщик</button>
+        <button data-act="clear">Убрать снег</button>
+        <button data-act="sound" class="snd">🔇 Звук</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="features">
+    <div class="section-head">
+      <h2>Что умеет Snowie</h2>
+    </div>
+    <div class="grid">
+      <article class="card wide">
+        <img src="assets/tems-throw.png" alt="Темс бросает снежок" loading="lazy" width="260" height="260">
+        <div>
+          <h3>Снежки</h3>
+          <p>Возьмите снег мышкой и покрутите курсором по кругу — комок скатается в шар. Над сугробом шар растёт без ограничений, но чем он больше, тем тяжелее его тянуть. Брошенный снежок разбивается об окно и оставляет след, который сползает и тает.</p>
+        </div>
+      </article>
+      <article class="card wide rev">
+        <img src="assets/tems-snowman.png" alt="Темс лепит снеговика" loading="lazy" width="260" height="260">
+        <div>
+          <h3>Снеговики</h3>
+          <p>Положите три шара друг на друга — получится снеговик в шляпе, с шарфом, носом-морковкой и руками-веточками. Шар остаётся, только если лёг ровно сверху; иначе соскользнёт. Сильным броском снеговика можно разбить.</p>
+        </div>
+      </article>
+      <article class="card">
+        <h3>Живые сугробы</h3>
+        <p>Снег копится на верхних краях окон и на панели задач, осыпается по углу откоса и свешивается с краёв. Сугроб едет вместе с окном, а если окно потрясти — слетает.</p>
+      </article>
+      <article class="card">
+        <h3>Снегоуборщик</h3>
+        <p>Раз в несколько минут по панели задач проезжает маленький снегоуборщик с мигалкой и расчищает дорогу. Снеговиков он объезжает.</p>
+      </article>
+      <article class="card wide">
+        <img src="assets/tems-sparkler.png" alt="Темс с бенгальским огнём" loading="lazy" width="260" height="260">
+        <div>
+          <h3>Новогодний салют</h3>
+          <p>Коробка с фейерверками на панели задач считает время до Нового года. В полночь — три минуты салюта и поздравление. Можно поставить свои таймеры, а щелчок по коробке запускает салют сразу.</p>
+        </div>
+      </article>
+      <article class="card">
+        <h3>Музыка и звуки</h3>
+        <p>«Jingle Bells» и «We Wish You a Merry Christmas» в аранжировке для музыкальной шкатулки. Снег хрустит, снежки свистят и шлёпаются. Всё синтезируется программой — ни одного аудиофайла.</p>
+      </article>
+      <article class="card">
+        <h3>Не мешает работать</h3>
+        <p>Щелчки мимо снега проходят в окна как обычно. Меню и подсказки снег не закрывает. В полноэкранных играх и видео он прячется сам.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="perf">
+    <div class="section-head">
+      <h2>Почти ничего не стоит</h2>
+      <p>Замеры встроенным профайлером на экране 3440×1440, обычный снегопад, 60 кадров/с.</p>
+    </div>
+    <div class="stats">
+      <div><b>0,6 мс</b><span>CPU на кадр</span></div>
+      <div><b>0,75 мс</b><span>GPU на кадр (медиана)</span></div>
+      <div><b>~3%</b><span>одного ядра процессора</span></div>
+      <div><b>55 МБ</b><span>памяти</span></div>
+    </div>
+    <p class="note-small">Рисует видеокарта через Direct2D и DirectComposition, частицы — одним вызовом на кадр, сугробы кешируются в текстурах. Подробности в <a data-repo-link data-path="/blob/main/docs/PERFORMANCE.md" href="#">docs/PERFORMANCE.md</a>.</p>
+  </section>
+
+  <section id="install" class="install">
+    <div class="section-head"><h2>Установка</h2></div>
+    <ol class="steps">
+      <li><b>Скачайте</b> <code>snowie.exe</code> со страницы <a data-release-link href="#">Releases</a>.</li>
+      <li><b>Запустите.</b> Появится значок-снежинка в трее, и пойдёт снег.</li>
+      <li><b>Настройте</b> по щелчку на значке: сила снегопада, высота сугробов, музыка, звуки, салют, автозапуск.</li>
+    </ol>
+    <p class="note-small">Или соберите сами: <code>cargo build --release</code> (нужен Rust 1.95+).</p>
+  </section>
+
+  <footer class="foot">
+    <img class="foot-art" src="assets/tems-sit.png" alt="" width="120" height="120" loading="lazy">
+    <p>Snowie — открытый проект под лицензией MIT.</p>
+    <p class="credits">Персонаж Темс основан на модели Нэто: <b>neto model created by @evanciao</b>. Иллюстрации нарисованы по её рендерам. Мелодии — общественное достояние.</p>
+  </footer>
+
+  <script src="snow.js?v=8"></script>
+</body>
+</html>

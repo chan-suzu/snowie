@@ -1,4 +1,4 @@
-# Measures Snowie's resource usage: CPU (Snowie and DWM, which composes the overlay),
+﻿# Measures Snowie's resource usage: CPU (Snowie and DWM, which composes the overlay),
 # memory, GPU load and GPU memory. Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\measure.ps1 [-Exe path] [-Seconds 20] [-Env "SNOWIE_PRESNOW=1,SNOWIE_LOG=1"]
 #   -Baseline measures the system without Snowie.
