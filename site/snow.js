@@ -99,41 +99,15 @@
     })(last);
   })();
 
-  // ---------------------------------------------------------------- Tems idle animation
-  // A puppet warp of the illustration in WebGL: every pixel samples the picture a few pixels
-  // away, by smooth per-body-part offsets. She breathes, sways, her hair and scarf move, the arm
-  // with the snowball bobs, and she blinks. Coordinates are pixels of the 900x900 tems-hero.png.
-  function idleTems(btn) {
-    const img = btn.querySelector('img');
-    if (!img || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = 900;
-    cv.setAttribute('aria-hidden', 'true');
-    const gl = cv.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false });
-    if (!gl) return;
-    const vs = `attribute vec2 p; varying vec2 uv; void main() { uv = p * 0.5 + 0.5; uv.y = 1.0 - uv.y; gl_Position = vec4(p, 0.0, 1.0); }`;
-    const fs = `
-      precision mediump float;
-      varying vec2 uv;
-      uniform sampler2D tex;
-      uniform float t, blink;
-      const float TAU = 6.2831853;
-      float band(float v, float a, float b) { return smoothstep(a - 10.0, a + 10.0, v) * (1.0 - smoothstep(b - 10.0, b + 10.0, v)); }
-      // closes one eye: skin from the top down to the lid, then a dark lid line
-      vec4 lid(vec4 c, vec2 s, vec2 e, float rx) {
-        float dx = (s.x - e.x) / rx, dy = (s.y - e.y) / 8.0;
-        float inside = 1.0 - smoothstep(0.8, 1.0, dx * dx + dy * dy);
-        if (inside <= 0.0 || blink <= 0.0) return c;
-        float edge = 82.0 + 15.0 * blink + 2.0 * (1.0 - dx * dx);
-        vec4 skin = vec4(vec3(0.918, 0.922, 0.91) * c.a, c.a);
-        vec4 ink = vec4(vec3(0.1, 0.1, 0.12) * c.a, c.a);
-        vec4 o = mix(c, skin, inside * step(s.y, edge));
-        float ln = (1.0 - smoothstep(0.6, 1.6, abs(s.y - edge))) * step(0.2, blink);
-        return mix(o, ink, ln * inside);
-      }
-      void main() {
-        vec2 p = uv * 900.0;
-        vec2 d = vec2(0.0);
+  // ---------------------------------------------------------------- idle animations (Tems, Suzu)
+  // A puppet warp of an illustration in WebGL: every pixel samples the picture a few pixels away,
+  // by smooth per-body-part offsets, so she breathes, sways, her hair and scarf move, and she
+  // blinks. Each character brings its own warp (GLSL working on `p`, `t` and the offset `d`, in
+  // pixels of its picture), its eyes [x, y, rx, ry] and its skin colour for the closed lids.
+  const TEMS_IDLE = {
+    name: 'tems', size: [900, 900], scale: 1, soft: 10, skin: [0.918, 0.922, 0.91],
+    eyes: [[445, 90, 14, 8], [490, 90, 15, 8]],
+    warp: `
         float breath = 0.5 - 0.5 * cos(TAU * t / 3.6);
         // the upper body rises with each breath and leans a little around the hips
         float up = 1.0 - smoothstep(300.0, 390.0, p.y);
@@ -163,11 +137,87 @@
         d += vec2(1.5 * cos(t * 0.9 + 1.0), 3.0 * sin(t * 1.2 + 2.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f1)));
         d += vec2(1.5 * cos(t * 1.3 + 2.0), 3.0 * sin(t * 1.0 + 4.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f2)));
         d += vec2(1.5 * cos(t * 1.2 + 3.0), 3.0 * sin(t * 1.4 + 1.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f3)));
+`,
+  };
+  // suzu-snowball.png is 308x560: drawn at twice that so the warp stays crisp
+  const SUZU_IDLE = {
+    name: 'suzu', size: [308, 560], scale: 2, soft: 4, skin: [0.992, 0.965, 0.906],
+    eyes: [[175, 130, 8.5, 8.5], [198, 130, 6, 8]],
+    warp: `
+        float breath = 0.5 - 0.5 * cos(TAU * t / 3.4);
+        // the upper body rises with each breath and leans a little from the hips; the legs stay put
+        float up = 1.0 - smoothstep(270.0, 320.0, p.y);
+        d.y -= 2.2 * breath * up;
+        d.x += 0.008 * sin(TAU * t / 6.5) * max(0.0, 330.0 - p.y);
+        // head tilt
+        float head = band(p.x, 140.0, 235.0) * band(p.y, 92.0, 172.0);
+        d.x += 1.0 * sin(TAU * t / 4.8 + 0.7) * head;
+        // the heavy snowball and the hands under it bob
+        float ball = 1.0 - smoothstep(88.0, 118.0, p.y);
+        d.y += 2.2 * sin(TAU * t / 2.6) * ball;
+        d.x += 0.8 * sin(TAU * t / 2.6 + 1.1) * ball;
+        // twin tails sway, more at the tips
+        float lt = band(p.x, 18.0, 106.0) * band(p.y, 112.0, 232.0);
+        d.x += 2.4 * sin(TAU * t / 2.9 + p.y * 0.02) * lt * smoothstep(115.0, 230.0, p.y);
+        float rt = band(p.x, 228.0, 292.0) * band(p.y, 150.0, 276.0);
+        d.x += 2.2 * sin(TAU * t / 3.1 + 1.3 + p.y * 0.02) * rt * smoothstep(160.0, 268.0, p.y);
+        // both ends of the scarf swing, the fringe flutters
+        float s1 = band(p.x, 0.0, 92.0) * band(p.y, 208.0, 262.0);
+        float k1 = clamp((92.0 - p.x) / 92.0, 0.0, 1.0);
+        d.y += (2.2 * sin(TAU * t / 2.2 - k1 * 2.5) + 0.7 * sin(TAU * t / 0.8 + k1 * 7.0)) * k1 * k1 * s1;
+        float s2 = band(p.x, 86.0, 128.0) * band(p.y, 175.0, 304.0);
+        float k2 = clamp((p.y - 175.0) / 129.0, 0.0, 1.0);
+        d.x += (2.4 * sin(TAU * t / 2.4 - k2 * 2.5) + 0.7 * sin(TAU * t / 0.85 + k2 * 7.0)) * k2 * k2 * s2;
+        // the skirt hem sways
+        float sk = band(p.x, 96.0, 276.0) * band(p.y, 300.0, 366.0);
+        d.x += 1.2 * sin(TAU * t / 3.4 + 0.4) * clamp((p.y - 300.0) / 60.0, 0.0, 1.0) * sk;
+        // the painted snowflakes drift
+        vec2 f0 = vec2(75.0, 57.0), f1 = vec2(295.0, 143.0);
+        d += vec2(1.0 * cos(t * 1.1), 2.0 * sin(t * 1.3)) * (1.0 - smoothstep(12.0, 18.0, distance(p, f0)));
+        d += vec2(1.0 * cos(t * 0.9 + 1.0), 2.0 * sin(t * 1.2 + 2.0)) * (1.0 - smoothstep(12.0, 18.0, distance(p, f1)));
+`,
+  };
+
+  function idleGL(btn, cfg) {
+    const img = btn.querySelector('img');
+    if (!img || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const [W0, H0] = cfg.size, cw = W0 * cfg.scale, ch = H0 * cfg.scale;
+    const f = v => (Number.isInteger(v) ? v + '.0' : String(v));
+    const cv = document.createElement('canvas');
+    cv.width = cw; cv.height = ch;
+    cv.setAttribute('aria-hidden', 'true');
+    const gl = cv.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false });
+    if (!gl) return;
+    const vs = `attribute vec2 p; varying vec2 uv; void main() { uv = p * 0.5 + 0.5; uv.y = 1.0 - uv.y; gl_Position = vec4(p, 0.0, 1.0); }`;
+    const fs = `
+      precision mediump float;
+      varying vec2 uv;
+      uniform sampler2D tex;
+      uniform float t, blink;
+      const float TAU = 6.2831853;
+      const vec2 SIZE = vec2(${f(W0)}, ${f(H0)});
+      const float SOFT = ${f(cfg.soft)};
+      float band(float v, float a, float b) { return smoothstep(a - SOFT, a + SOFT, v) * (1.0 - smoothstep(b - SOFT, b + SOFT, v)); }
+      // closes one eye: skin from the top down to the lid, then a dark lid line
+      vec4 lid(vec4 c, vec2 s, vec2 e, float rx, float ry) {
+        float dx = (s.x - e.x) / rx, dy = (s.y - e.y) / ry;
+        float inside = 1.0 - smoothstep(0.8, 1.0, dx * dx + dy * dy);
+        if (inside <= 0.0 || blink <= 0.0) return c;
+        float edge = e.y - ry + (2.0 * ry - 1.0) * blink + 0.25 * ry * (1.0 - dx * dx);
+        vec4 skin = vec4(vec3(${cfg.skin.map(f).join(', ')}) * c.a, c.a);
+        vec4 ink = vec4(vec3(0.1, 0.1, 0.12) * c.a, c.a);
+        vec4 o = mix(c, skin, inside * step(s.y, edge));
+        float ln = (1.0 - smoothstep(0.6, 1.6, abs(s.y - edge) * ${f(Math.max(1, 900 / Math.max(W0, H0) / 1.6))})) * step(0.2, blink);
+        return mix(o, ink, ln * inside);
+      }
+      void main() {
+        vec2 p = uv * SIZE;
+        vec2 d = vec2(0.0);
+${cfg.warp}
         vec2 s = p - d;
-        if (s.x < 0.0 || s.y < 0.0 || s.x > 900.0 || s.y > 900.0) { gl_FragColor = vec4(0.0); return; }
-        vec4 c = texture2D(tex, s / 900.0);
-        c = lid(c, s, vec2(445.0, 90.0), 14.0);
-        c = lid(c, s, vec2(490.0, 90.0), 15.0);
+        if (s.x < 0.0 || s.y < 0.0 || s.x > SIZE.x || s.y > SIZE.y) { gl_FragColor = vec4(0.0); return; }
+        vec4 c = texture2D(tex, s / SIZE);
+${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2])}, ${f(e[3])});`).join('\n')}
         gl_FragColor = c;
       }`;
     const sh = (type, src) => {
@@ -185,7 +235,7 @@
       gl.linkProgram(prog);
       if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
     } catch (e) {
-      console.warn('Tems idle animation disabled:', e);
+      console.warn(cfg.name + ' idle animation disabled:', e);
       return; // the static picture stays
     }
     gl.useProgram(prog);
@@ -213,14 +263,14 @@
       (function frame(now) {
         requestAnimationFrame(frame);
         if (!onScreen || document.hidden) return;
-        // window.__temsDebug = { t, blink } pins a moment, for checking the animation by eye
-        const dbg = window.__temsDebug || {};
+        // window.__temsDebug / __suzuDebug = { t, blink } pins a moment, for checking by eye
+        const dbg = window['__' + cfg.name + 'Debug'] || {};
         const t = dbg.t ?? (now - t0) / 1000;
         // a blink every 2.5-6 s, sometimes a double one
         if (t > nextBlink) { blinkAt = t; nextBlink = t + 2.5 + Math.random() * 3.5; if (Math.random() < 0.2) nextBlink = t + 0.35; }
         const bt = (t - blinkAt) / 0.16;
         const blink = dbg.blink ?? (blinkAt >= 0 && bt < 1 ? 1 - Math.abs(bt * 2 - 1) : 0);
-        gl.viewport(0, 0, 900, 900);
+        gl.viewport(0, 0, cw, ch);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.uniform1f(uT, t);
@@ -233,10 +283,11 @@
 
   // ---------------------------------------------------------------- Tems in the hero
   // Hops now and then; a click makes her throw a snowball that flies off in an arc and splats.
-  // Suzu next to Tems: hops when clicked
+  // Suzu next to Tems: breathes and blinks like Tems, hops when clicked
   (function heroSuzu() {
     const btn = document.getElementById('suzu');
     if (!btn) return;
+    idleGL(btn, SUZU_IDLE);
     btn.addEventListener('click', () => {
       btn.classList.remove('hop'); void btn.offsetWidth; btn.classList.add('hop');
       setTimeout(() => btn.classList.remove('hop'), 700);
@@ -246,7 +297,7 @@
   (function heroTems() {
     const btn = document.getElementById('tems');
     if (!btn) return;
-    idleTems(btn);
+    idleGL(btn, TEMS_IDLE);
     const replay = cls => { btn.classList.remove('hop', 'throw'); void btn.offsetWidth; btn.classList.add(cls); };
     setInterval(() => { if (!document.hidden && !btn.classList.contains('busy')) replay('hop'); }, 7000);
     btn.addEventListener('click', () => {
