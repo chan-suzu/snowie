@@ -32,7 +32,9 @@ jobs:
           # a tag with a suffix (v0.3.0-beta.1) is a test build: "latest" stays on the last stable one
           prerelease: ${{ contains(github.ref_name, '-') }}
 
+  # the macOS app is still a beta: only tags with a suffix (v0.3.0-beta.2) build it
   macos:
+    if: contains(github.ref_name, '-')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
