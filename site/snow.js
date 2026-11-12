@@ -97,6 +97,182 @@
     })(last);
   })();
 
+  // ---------------------------------------------------------------- Tems idle animation
+  // A puppet warp of the illustration in WebGL: every pixel samples the picture a few pixels
+  // away, by smooth per-body-part offsets. She breathes, sways, her hair and scarf move, the arm
+  // with the snowball bobs, and she blinks. Coordinates are pixels of the 900x900 tems-hero.png.
+  function idleTems(btn) {
+    const img = btn.querySelector('img');
+    if (!img || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 900;
+    cv.setAttribute('aria-hidden', 'true');
+    const gl = cv.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false });
+    if (!gl) return;
+    const vs = `attribute vec2 p; varying vec2 uv; void main() { uv = p * 0.5 + 0.5; uv.y = 1.0 - uv.y; gl_Position = vec4(p, 0.0, 1.0); }`;
+    const fs = `
+      precision mediump float;
+      varying vec2 uv;
+      uniform sampler2D tex;
+      uniform float t, blink;
+      const float TAU = 6.2831853;
+      float band(float v, float a, float b) { return smoothstep(a - 10.0, a + 10.0, v) * (1.0 - smoothstep(b - 10.0, b + 10.0, v)); }
+      // closes one eye: skin from the top down to the lid, then a dark lid line
+      vec4 lid(vec4 c, vec2 s, vec2 e, float rx) {
+        float dx = (s.x - e.x) / rx, dy = (s.y - e.y) / 8.0;
+        float inside = 1.0 - smoothstep(0.8, 1.0, dx * dx + dy * dy);
+        if (inside <= 0.0 || blink <= 0.0) return c;
+        float edge = 82.0 + 15.0 * blink + 2.0 * (1.0 - dx * dx);
+        vec4 skin = vec4(vec3(0.918, 0.922, 0.91) * c.a, c.a);
+        vec4 ink = vec4(vec3(0.1, 0.1, 0.12) * c.a, c.a);
+        vec4 o = mix(c, skin, inside * step(s.y, edge));
+        float ln = (1.0 - smoothstep(0.6, 1.6, abs(s.y - edge))) * step(0.2, blink);
+        return mix(o, ink, ln * inside);
+      }
+      void main() {
+        vec2 p = uv * 900.0;
+        vec2 d = vec2(0.0);
+        float breath = 0.5 - 0.5 * cos(TAU * t / 3.6);
+        // the upper body rises with each breath and leans a little around the hips
+        float up = 1.0 - smoothstep(300.0, 390.0, p.y);
+        d.y -= 4.0 * breath * up;
+        d.x += 0.011 * sin(TAU * t / 7.0) * max(0.0, 430.0 - p.y);
+        // head tilt
+        float head = 1.0 - smoothstep(150.0, 240.0, p.y);
+        d.x += 1.6 * sin(TAU * t / 5.0 + 0.7) * head;
+        // strands of hair on both sides sway, more at the tips
+        float hair = (band(p.x, 360.0, 428.0) + band(p.x, 532.0, 575.0)) * band(p.y, 40.0, 270.0);
+        d.x += 2.4 * sin(TAU * t / 2.7 + p.y * 0.03) * hair * smoothstep(60.0, 220.0, p.y);
+        // the hanging end of the scarf swings, the fringe flutters
+        float sk = clamp((p.y - 190.0) / 175.0, 0.0, 1.0);
+        float scarf = band(p.x, 472.0, 560.0) * band(p.y, 190.0, 362.0);
+        d.x += (3.4 * sin(TAU * t / 2.3 - sk * 2.5) + 1.1 * sin(TAU * t / 0.8 + sk * 7.0)) * sk * sk * scarf;
+        // the arm with the snowball weighs the ball
+        float arm = band(p.x, 228.0, 405.0) * band(p.y, 72.0, 305.0);
+        float wa = clamp((300.0 - p.y) / 220.0, 0.0, 1.0);
+        d.y += 3.2 * sin(TAU * t / 2.4) * wa * arm;
+        d.x += 1.0 * sin(TAU * t / 2.4 + 1.2) * wa * arm;
+        // the hanging sleeve swings a little
+        float sl = band(p.x, 558.0, 672.0) * band(p.y, 212.0, 452.0);
+        d.x += 2.8 * sin(TAU * t / 3.6 + 0.8) * clamp((p.y - 215.0) / 235.0, 0.0, 1.0) * sl;
+        // the painted snowflakes drift
+        vec2 f0 = vec2(320.0, 16.0), f1 = vec2(622.0, 106.0), f2 = vec2(634.0, 246.0), f3 = vec2(312.0, 365.0);
+        d += vec2(1.5 * cos(t * 1.1), 3.0 * sin(t * 1.3)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f0)));
+        d += vec2(1.5 * cos(t * 0.9 + 1.0), 3.0 * sin(t * 1.2 + 2.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f1)));
+        d += vec2(1.5 * cos(t * 1.3 + 2.0), 3.0 * sin(t * 1.0 + 4.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f2)));
+        d += vec2(1.5 * cos(t * 1.2 + 3.0), 3.0 * sin(t * 1.4 + 1.0)) * (1.0 - smoothstep(16.0, 26.0, distance(p, f3)));
+        vec2 s = p - d;
+        if (s.x < 0.0 || s.y < 0.0 || s.x > 900.0 || s.y > 900.0) { gl_FragColor = vec4(0.0); return; }
+        vec4 c = texture2D(tex, s / 900.0);
+        c = lid(c, s, vec2(445.0, 90.0), 14.0);
+        c = lid(c, s, vec2(490.0, 90.0), 15.0);
+        gl_FragColor = c;
+      }`;
+    const sh = (type, src) => {
+      const o = gl.createShader(type);
+      gl.shaderSource(o, src);
+      gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+      return o;
+    };
+    let prog;
+    try {
+      prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    } catch (e) {
+      console.warn('Tems idle animation disabled:', e);
+      return; // the static picture stays
+    }
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const uT = gl.getUniformLocation(prog, 't'), uBlink = gl.getUniformLocation(prog, 'blink');
+    const start = () => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      btn.insertBefore(cv, img);
+      btn.classList.add('gl');
+      let onScreen = true, nextBlink = 2.5, blinkAt = -1;
+      new IntersectionObserver(es => (onScreen = es[0].isIntersecting)).observe(btn);
+      const t0 = performance.now();
+      (function frame(now) {
+        requestAnimationFrame(frame);
+        if (!onScreen || document.hidden) return;
+        // window.__temsDebug = { t, blink } pins a moment, for checking the animation by eye
+        const dbg = window.__temsDebug || {};
+        const t = dbg.t ?? (now - t0) / 1000;
+        // a blink every 2.5-6 s, sometimes a double one
+        if (t > nextBlink) { blinkAt = t; nextBlink = t + 2.5 + Math.random() * 3.5; if (Math.random() < 0.2) nextBlink = t + 0.35; }
+        const bt = (t - blinkAt) / 0.16;
+        const blink = dbg.blink ?? (blinkAt >= 0 && bt < 1 ? 1 - Math.abs(bt * 2 - 1) : 0);
+        gl.viewport(0, 0, 900, 900);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.uniform1f(uT, t);
+        gl.uniform1f(uBlink, blink);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      })(t0);
+    };
+    if (img.complete && img.naturalWidth) start(); else img.addEventListener('load', start, { once: true });
+  }
+
+  // ---------------------------------------------------------------- Tems in the hero
+  // Hops now and then; a click makes her throw a snowball that flies off in an arc and splats.
+  (function heroTems() {
+    const btn = document.getElementById('tems');
+    if (!btn) return;
+    idleTems(btn);
+    const replay = cls => { btn.classList.remove('hop', 'throw'); void btn.offsetWidth; btn.classList.add(cls); };
+    setInterval(() => { if (!document.hidden && !btn.classList.contains('busy')) replay('hop'); }, 7000);
+    btn.addEventListener('click', () => {
+      btn.classList.add('used', 'busy');
+      replay('throw');
+      setTimeout(() => btn.classList.remove('busy'), 900);
+      const r = btn.getBoundingClientRect();
+      // the snowball in her raised hand
+      const x0 = r.left + r.width * 0.36, y0 = r.top + r.height * 0.14;
+      const vx = -(420 + Math.random() * 260), vy = -(380 + Math.random() * 200), g = 1100;
+      const ball = document.createElement('div');
+      ball.className = 'thrown';
+      document.body.appendChild(ball);
+      const floorY = Math.min(innerHeight - 20, r.bottom + 40);
+      let t = 0, last = performance.now();
+      (function fly(now) {
+        t += Math.min((now - last) / 1000, 0.05); last = now;
+        const x = x0 + vx * t, y = y0 + vy * t + 0.5 * g * t * t;
+        ball.style.transform = `translate(${x}px, ${y}px) rotate(${t * -720}deg)`;
+        if (y < floorY && x > -40) { requestAnimationFrame(fly); return; }
+        ball.remove();
+        for (let i = 0; i < 14; i++) {
+          const p = document.createElement('div');
+          p.className = 'puff';
+          document.body.appendChild(p);
+          const a = Math.PI + Math.random() * Math.PI, sp = 40 + Math.random() * 90;
+          p.animate(
+            [{ transform: `translate(${x}px, ${y}px)`, opacity: 1 },
+             { transform: `translate(${x + Math.cos(a) * sp}px, ${y + Math.sin(a) * sp + 40}px)`, opacity: 0 }],
+            { duration: 600 + Math.random() * 300, easing: 'cubic-bezier(.2,.7,.4,1)' }
+          ).onfinish = () => p.remove();
+        }
+        Sound.play('splat', 0, 0.6);
+      })(last);
+      Sound.play('throw', 0, 0.6);
+    });
+  })();
+
   // ---------------------------------------------------------------- audio
   // Snow sounds, synthesized like in the app: filtered noise grains for crunch, sweeps for whooshes.
   const Sound = (() => {
@@ -211,7 +387,7 @@
 
   function newSurface(left, top, width, maxH, walls) {
     const n = Math.max(1, Math.ceil(width / COL));
-    return { left, top, n, h: new Float32Array(n), vis: new Uint8Array(n).fill(walls ? 1 : 0), maxH, walls, spillL: 0, spillR: 0 };
+    return { left, top, n, h: new Float32Array(n), vis: new Uint8Array(n).fill(walls ? 1 : 0), maxH, walls, spillL: 0, spillR: 0, wave: Math.random() * 100 };
   }
   let floor = newSurface(0, 0, 10, 50, true);
 
@@ -245,7 +421,7 @@
       w.h = w.el.offsetHeight;
       if (!w.moved) {
         w.x = clamp(narrow ? 12 + i * 18 : w.fx * W, 8, Math.max(8, W - w.w - 8));
-        w.y = narrow ? 70 + i * 120 : w.fy;
+        w.y = narrow ? 175 + i * 105 : w.fy; // room above the first window for Tems and the buttons
       } else w.x = clamp(w.x, -w.w + 60, W - 60);
       w.el.style.left = w.x + 'px';
       w.el.style.top = w.y + 'px';
@@ -269,6 +445,13 @@
   // ---------------------------------------------------------------- drift helpers
   const colOf = (s, x) => { const c = Math.floor((x - s.left) / COL); return c >= 0 && c < s.n ? c : -1; };
   const surfY = (s, c) => s.top - s.h[c];
+  // how high the drift can grow at column i: not one flat limit but a gentle roll along the
+  // window, so a full drift is a row of soft mounds instead of a shelf cut off at the top
+  function cap(s, i) {
+    const x = i * COL, p = s.wave;
+    const n = 0.55 * Math.sin(x / 61 + p) + 0.3 * Math.sin(x / 27 + p * 1.7) + 0.15 * Math.sin(x / 13 + p * 2.9);
+    return s.maxH * (0.8 + 0.2 * n);
+  }
   function deposit(s, x, m, spread) {
     const c = colOf(s, x);
     if (c < 0) return;
@@ -277,7 +460,10 @@
     for (let k = -w; k <= w; k++) if (c + k >= 0 && c + k < s.n) sum += w + 1 - Math.abs(k);
     for (let k = -w; k <= w; k++) {
       const i = c + k;
-      if (i >= 0 && i < s.n) s.h[i] = Math.min(s.maxH, s.h[i] + (m / COL) * (w + 1 - Math.abs(k)) / sum);
+      if (i < 0 || i >= s.n) continue;
+      // growth slows down well before the cap, so the top rounds off instead of flattening
+      const lim = cap(s, i), room = clamp((lim - s.h[i]) / (0.35 * lim), 0, 1);
+      s.h[i] = Math.min(s.maxH, s.h[i] + room * (m / COL) * (w + 1 - Math.abs(k)) / sum);
     }
   }
   function take(s, cx, radius, depth) {
@@ -294,6 +480,9 @@
   function relax(s) {
     const h = s.h, n = s.n, slope = 0.85 * COL;
     if (n < 2) return;
+    // snow piled above its cap slowly settles back, so the mounds keep their shape
+    const low = s.maxH * 0.6;
+    for (let i = 0; i < n; i++) if (h[i] > low) { const c = cap(s, i); if (h[i] > c + 0.05) h[i] -= (h[i] - c) * 0.01; }
     const flip = Math.random() < 0.5;
     const step = i => {
       const d = h[i] - h[i + 1];
@@ -387,6 +576,7 @@
   desk.addEventListener('pointermove', e => {
     const p = local(e);
     if (held) moveHeld(p);
+    else if (carry) { carry.tx = p.x + carry.gx; carry.ty = p.y + carry.gy; }
     else if (drag && e.pointerId === drag.id) {
       const w = drag.w;
       w.x = clamp(p.x - drag.dx, -w.w + 60, W - 60);
@@ -397,11 +587,95 @@
   });
   const endPointer = e => {
     if (held) release(local(e));
+    if (carry) putDown(local(e));
     if (drag) { drag.w.el.classList.remove('drag'); drag = null; }
   };
   desk.addEventListener('pointerup', endPointer);
   desk.addEventListener('pointercancel', endPointer);
   function local(e) { const r = desk.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+
+  // A moving window works like a snowplow blade on every other drift: snow that ends up inside
+  // the window (or inside the snow on its top) is shoved out ahead of it, in the direction of
+  // motion; pushed past the end of a window, it falls off.
+  function pushSnow() {
+    for (const a of wins) {
+      if (a.px === undefined) { a.px = a.x; a.py = a.y; continue; }
+      const dx = a.x - a.px, dy = a.y - a.py;
+      a.px = a.x; a.py = a.y;
+      if (!dx && !dy) continue;
+      const own = a.surf;
+      const edge = Math.max(own.h[0] || 0, own.h[own.n - 1] || 0, ...Array.from(own.h.subarray(0, own.n), v => v * 0.6));
+      // only a drift pushes a drift: the top edge with its snow, moving sideways, against snow at
+      // about the same level; passing in front of other snow (up, down, other height) just hides it
+      // direction from the smoothed velocity: a hand drag jitters, and a single sideways step
+      // while the window rises past another drift must not count as a push
+      const v = a.vel;
+      const sideways = Math.abs(v.x) >= 150 && Math.abs(v.x) >= Math.abs(v.y) * 2;
+      // a jump (the window snapped somewhere) is not a drag through the snow
+      if (!sideways || !dx || Math.abs(dx) > 150 || Math.sign(dx) !== Math.sign(v.x)) continue;
+      const dir = Math.sign(dx);
+      const bandTop = a.y - edge - 1, bandBot = a.y + 6;
+      // the blade is the strip the leading edge swept this frame: snow already under the window
+      // (it came from below or above) stays where it is, hidden behind it
+      const sweep = Math.ceil(Math.abs(dx)) + 2 + COL;
+      const blade = dir > 0 ? { x: a.x + a.w - sweep, w: sweep } : { x: a.x, w: sweep };
+      for (const o of wins) {
+        if (o === a || o.z > a.z) continue; // a window in front of the moving one is not touched
+        plowSurface(o.surf, blade, bandTop, bandBot, dir);
+        pushStacks(o, blade, bandTop, bandBot, dir);
+      }
+    }
+  }
+  function plowSurface(s, a, bandTop, bandBot, dir) {
+    if (s.top <= bandTop || s.top - s.maxH * 1.6 >= bandBot) return;
+    const c0 = Math.max(0, Math.floor((a.x - s.left) / COL)), c1 = Math.min(s.n, Math.ceil((a.x + a.w - s.left) / COL));
+    if (c0 >= c1) return;
+    const mid = (c0 + c1) / 2;
+    let left = 0, right = 0;
+    for (let c = c0; c < c1; c++) {
+      if (s.h[c] <= 0.05 || s.top - s.h[c] >= bandBot) continue;
+      if (dir > 0 || (dir === 0 && c >= mid)) right += s.h[c]; else left += s.h[c];
+      s.h[c] = 0;
+    }
+    dump(s, c1, right, 1);
+    dump(s, c0 - 1, left, -1);
+  }
+  // piles pushed snow up just past the blade: a mound leaning on the blade and sloping away from
+  // it, taller and wider the more snow is pushed; what runs off the end of the drift falls
+  function dump(s, c, m, side) {
+    if (m <= 0) return;
+    const slope = 0.5 * COL, top = s.maxH * 1.4;
+    let end = c;
+    for (let pass = 0; pass < 4 && m > 0.01 && c >= 0 && c < s.n; pass++) {
+      const base = s.h[c], peak = Math.min(top, base + Math.sqrt(m * slope)); // a triangle holds H² / slope
+      if (peak <= base + 0.01) break;
+      for (let k = 0; ; k++) {
+        const i = c + side * k;
+        if (i < 0 || i >= s.n) { end = i; break; }
+        const target = peak - slope * k;
+        if (target <= s.h[i]) { if (target < base - 2) break; continue; }
+        const add = Math.min(m, target - s.h[i]);
+        s.h[i] += add; m -= add;
+        if (m <= 0.01) break;
+      }
+    }
+    if (m > 0.01) {
+      const at = end < 0 || end >= s.n ? end : c;
+      const x = s.left + clamp(at, 0, s.n) * COL, n = Math.min(12, Math.ceil(m / 3));
+      for (let k = 0; k < n; k++) chunk(x + side * rand(1, 6), s.top - rand(4, 14), side * rand(30, 120), -rand(20, 80), (m * COL) / n);
+    }
+  }
+  function pushStacks(o, a, bandTop, bandBot, dir) {
+    const s = o ? o.surf : floor;
+    for (const st of stacks) {
+      if (st.carried || (st.surf || null) !== o || !st.centers.length) continue;
+      const x = s.left + st.x, r = st.balls[0].r;
+      if (s.top <= bandTop || s.top - r * 2 >= bandBot) continue;
+      if (x + r < a.x || x - r > a.x + a.w) continue;
+      const toRight = dir > 0 || (dir === 0 && x >= a.x + a.w / 2);
+      st.x = (toRight ? a.x + a.w + r : a.x - r) - s.left;
+    }
+  }
 
   function syncWindows(dt) {
     for (const w of wins) {
@@ -409,14 +683,15 @@
       // the drift rides with its window; speed and jerk over the last ~60 ms
       if (s.left !== w.x || s.top !== w.y) { s.left = w.x; s.top = w.y; }
       w.hist.push({ t: time, x: w.x, y: w.y, vx: w.vel.x, vy: w.vel.y });
-      while (w.hist.length > 2 && time - w.hist[1].t >= 0.06) w.hist.shift();
+      while (w.hist.length > 2 && time - w.hist[1].t >= 0.035) w.hist.shift();
       const h0 = w.hist[0], span = time - h0.t;
       if (span > 1e-3) {
         const vx = (w.x - h0.x) / span, vy = (w.y - h0.y) / span;
         w.jerk = Math.hypot(vx - h0.vx, vy - h0.vy) / span;
         w.vel = { x: vx, y: vy };
       }
-      if (w.jerk > 40000) shed(s, Math.min(0.7, ((w.jerk - 40000) / 80000) * dt * 8), w.vel.x * 0.35, w.vel.y * 0.35);
+      // browsers report pointer moves less often than the OS, so a shake reads softer here
+      if (w.jerk > 12000) shed(s, Math.min(0.7, ((w.jerk - 12000) / 30000) * dt * 10), w.vel.x * 0.35, w.vel.y * 0.35);
       if (s.spillL > 5) { chunk(s.left - 1.5, s.top - s.h[0] - 1, -rand(10, 40), 0, s.spillL); s.spillL = 0; }
       if (s.spillR > 5) { chunk(s.left + s.n * COL + 0.5, s.top - s.h[s.n - 1] - 1, rand(10, 40), 0, s.spillR); s.spillR = 0; }
     }
@@ -424,14 +699,24 @@
 
   // ---------------------------------------------------------------- grabbing and rolling
   function tryGrab(p) {
-    if (held) return false;
+    if (held || carry) return false;
     if (box && p.x > box.x - box.w / 2 - 4 && p.x < box.x + box.w / 2 + 4 && p.y > box.y - box.h - 4 && p.y < box.y + 4) {
       salute(4, 2.5);
       return true;
     }
     for (let i = 0; i < stacks.length; i++) {
       const st = stacks[i];
-      if (st.centers.some((c, j) => Math.hypot(p.x - c.x, p.y - c.y) <= st.balls[j].r)) {
+      const j = st.centers.findIndex((c, k) => Math.hypot(p.x - c.x, p.y - c.y) <= st.balls[k].r);
+      if (j < 0) continue;
+      // grabbed by the bottom ball, a stack or a snowman moves whole; anywhere else the top ball comes off
+      if (j === 0 && st.balls.length >= 2) {
+        const fx = st.centers[0].x, fy = st.centers[0].y + st.balls[0].r * 0.85;
+        st.carried = true;
+        carry = { st, fx, fy, tx: fx, ty: fy, vx: 0, gx: fx - p.x, gy: fy - p.y };
+        Sound.play('grab', panOf(p.x));
+        return true;
+      }
+      {
         const c = st.centers[st.centers.length - 1], b = st.balls.pop();
         if (!st.balls.length) stacks.splice(i, 1);
         held = mkHeld(c, p, b.m, 1, []);
@@ -453,6 +738,50 @@
   }
   function mkHeld(pos, cursor, m, comp, blobs) {
     return { x: pos.x, y: pos.y, cx: cursor.x, cy: cursor.y, vx: 0, vy: 0, m, comp, rot: 0, spin: 0, lastDir: null, lx: cursor.x, ly: cursor.y, blobs, roll: 0 };
+  }
+  let carry = null;
+  // the carried stack trails the cursor, slower the heavier it is; the upper balls sway behind
+  function updateCarry(dt) {
+    const c = carry;
+    if (!c) return;
+    const st = c.st, r0 = st.balls[0].r, m = st.balls.reduce((a, b) => a + b.m, 0);
+    const rate = 22 / (1 + (ballR(m) / 45) ** 2), k = 1 - Math.exp(-rate * dt), px = c.fx;
+    c.fx += (c.tx - c.fx) * k; c.fy += (c.ty - c.fy) * k;
+    c.vx = c.vx * 0.6 + ((c.fx - px) / Math.max(dt, 1e-4)) * 0.4;
+    st.centers = [];
+    let y = c.fy + r0 * 0.15;
+    const ease = Math.exp(-10 * dt);
+    st.balls.forEach((b, j) => {
+      y -= b.r * (j === 0 ? 1 : 0.8);
+      const lean = clamp(-c.vx * 0.006 * j, -b.r * 0.35, b.r * 0.35);
+      b.off.x = lean + (b.off.x - lean) * ease; b.off.y *= ease;
+      st.centers.push({ x: c.fx + b.off.x, y: y + b.off.y });
+      y -= b.r * 0.8;
+    });
+  }
+  // sets the carried stack down on the first drift below it; over nothing it falls apart
+  function putDown(p) {
+    const c = carry, st = c.st;
+    carry = null;
+    st.carried = false;
+    c.tx = p.x + c.gx; c.ty = p.y + c.gy;
+    const r0 = st.balls[0].r, s = findLanding(c.fx, c.fy - r0 * 0.5, 1e5, false), col = s ? colOf(s, c.fx) : -1;
+    if (s && col >= 0) {
+      st.surf = s === floor ? null : winOf(s);
+      st.x = c.fx - s.left;
+      // the balls ease from where they are down onto the drift instead of jumping
+      let y = surfY(s, col) + r0 * 0.15;
+      st.balls.forEach((b, j) => {
+        y -= b.r * (j === 0 ? 1 : 0.8);
+        const o = st.centers[j] || { x: c.fx, y };
+        b.off = { x: o.x - c.fx, y: o.y - y };
+        y -= b.r * 0.8;
+      });
+      Sound.play('plop', panOf(c.fx));
+      return;
+    }
+    stacks.splice(stacks.indexOf(st), 1);
+    st.balls.forEach((b, j) => balls.push({ x: st.centers[j]?.x ?? c.fx, y: st.centers[j]?.y ?? c.fy, vx: c.vx * 0.5, vy: 0, m: b.m, r: b.r, rot: 0, spin: 0, ignore: [] }));
   }
   function moveHeld(p) {
     const h = held;
@@ -536,8 +865,10 @@
   function stackSurf(st) { return st.surf ? st.surf.surf : floor; }
   function updateStacks(dt) {
     for (let i = stacks.length - 1; i >= 0; i--) {
-      const st = stacks[i], s = stackSurf(st), x = s.left + st.x, c = colOf(s, x);
-      const shaken = st.surf && st.surf.jerk > 60000;
+      const st = stacks[i];
+      if (st.carried) continue; // positioned by updateCarry
+      const s = stackSurf(st), x = s.left + st.x, c = colOf(s, x);
+      const shaken = st.surf && st.surf.jerk > 30000;
       if (c < 0 || shaken) {
         stacks.splice(i, 1);
         st.balls.forEach((b, j) => balls.push({ x: st.centers[j]?.x ?? x, y: st.centers[j]?.y ?? s.top, vx: (st.surf?.vel.x || 0) * 0.5, vy: 0, m: b.m, r: b.r, rot: 0, spin: 0, ignore: [] }));
@@ -558,7 +889,7 @@
   function stackHit(b) {
     for (let i = 0; i < stacks.length; i++) {
       const st = stacks[i];
-      if (!st.visible) continue;
+      if (!st.visible || st.carried) continue;
       for (let j = 0; j < st.centers.length; j++) {
         const c = st.centers[j], rj = st.balls[j].r, dx = b.x - c.x, dy = b.y - c.y, d = Math.hypot(dx, dy), contact = (b.r + rj) * 0.92;
         if (d >= contact) continue;
@@ -614,7 +945,7 @@
         if (s) {
           const w = winOf(s), sv = w ? Math.hypot(b.vx - w.vel.x, b.vy - w.vel.y) : Math.hypot(b.vx, b.vy);
           if (sv < 1050) {
-            stacks.push({ surf: w || null, x: b.x - s.left, balls: [{ r: b.r, m: b.m, off: { x: 0, y: 0 } }], centers: [{ x: b.x, y: b.y }], visible: true, seed: (Math.random() * 4) | 0 });
+            stacks.push({ surf: w || null, x: b.x - s.left, balls: [{ r: b.r, m: b.m, off: { x: 0, y: 0 } }], centers: [{ x: b.x, y: b.y }], visible: true, seed: (Math.random() * 4) | 0, look: (Math.random() * 1e9) | 0 });
             Sound.play('plop', panOf(b.x), 0.9, clamp(1.4 - b.r / 80, 0.6, 1.4));
           } else splat(b.x, b.y + b.r * 0.8, b.vx, b.vy, b.m, b.r, { surf: s });
           gone = true;
@@ -712,7 +1043,7 @@
   }
   function updateBox() {
     const x = W * 0.86, c = colOf(floor, x);
-    box = { x, y: c >= 0 ? surfY(floor, c) + 3 : FLOOR, w: 50, h: 32 };
+    box = { x, y: c >= 0 ? surfY(floor, c) + 3 : FLOOR, w: 58, h: 48 };
   }
   function countdown() {
     const now = new Date(), ny = new Date(now.getFullYear() + 1, 0, 1);
@@ -744,32 +1075,69 @@
     const emit = Math.min(p.load, p.load * dt * 3);
     p.load -= emit;
     const n = Math.min(4, Math.ceil(emit / 25));
-    for (let i = 0; i < n && parts.length < MAXP; i++) parts.push({ x: p.x + p.dir * 50 + rand(-3, 3), y: FLOOR - 72, vx: -p.dir * rand(80, 300), vy: -rand(300, 550), r: rand(1.5, 3.5), m: 0, kind: 2, a: rand(0.8, 1.1) });
+    for (let i = 0; i < n && parts.length < MAXP; i++) parts.push({ x: p.x - p.dir * 40 + rand(-3, 3), y: FLOOR - 70, vx: -p.dir * rand(80, 300), vy: -rand(300, 550), r: rand(1.5, 3.5), m: 0, kind: 2, a: rand(0.8, 1.1) });
     if (p.x < -200 || p.x > W + 200) plow = null;
   }
 
   // ---------------------------------------------------------------- drawing
-  function drawDrift(s) {
-    // one filled path per visible run, outline only where the drift really ends
-    g.beginPath();
+  // Rectangles of the windows in front of window `w` (null: the taskbar, in front of everything).
+  const frontOf = w => (w ? wins.filter(o => o.z > w.z) : []);
+  // `area` minus the occluders, as a few disjoint rectangles
+  function subtract(area, occ) {
+    let parts = [area];
+    for (const o of occ) {
+      const next = [];
+      for (const p of parts) {
+        if (o.x + o.w <= p.x || o.x >= p.x + p.w || o.y + o.h <= p.y || o.y >= p.y + p.h) { next.push(p); continue; }
+        if (o.y > p.y) next.push({ x: p.x, y: p.y, w: p.w, h: o.y - p.y });
+        if (o.y + o.h < p.y + p.h) next.push({ x: p.x, y: o.y + o.h, w: p.w, h: p.y + p.h - (o.y + o.h) });
+        const t = Math.max(p.y, o.y), b = Math.min(p.y + p.h, o.y + o.h);
+        if (o.x > p.x) next.push({ x: p.x, y: t, w: o.x - p.x, h: b - t });
+        if (o.x + o.w < p.x + p.w) next.push({ x: o.x + o.w, y: t, w: p.x + p.w - (o.x + o.w), h: b - t });
+      }
+      parts = next;
+    }
+    return parts;
+  }
+  // paints only inside `area` and never over the windows in front of `w`
+  function occluded(w, area, draw) {
+    const front = frontOf(w);
+    if (!front.length) { draw(); return; }
+    for (const p of subtract(area, front)) {
+      g.save(); g.beginPath(); g.rect(p.x, p.y, p.w, p.h); g.clip();
+      draw();
+      g.restore();
+    }
+  }
+  function drawDrift(s, w) {
+    // the whole drift is drawn, even where a window in front covers its base line: the windows
+    // in front clip it below, so it is hidden exactly up to their edge instead of vanishing
+    if (w && w.y <= 5) return; // pressed against the top: no room for snow
+    const fill = new Path2D(), line = new Path2D();
     let any = false;
     for (let i = 0; i < s.n;) {
-      if (!s.vis[i] || s.h[i] < 0.3) { i++; continue; }
+      if (s.h[i] < 0.3) { i++; continue; }
       const a = i;
-      while (i < s.n && s.vis[i] && s.h[i] >= 0.3) i++;
+      while (i < s.n && s.h[i] >= 0.3) i++;
       const x0 = s.left + a * COL, x1 = s.left + i * COL;
-      g.moveTo(x0, s.top);
-      for (let k = a; k < i; k++) g.lineTo(s.left + k * COL + COL / 2, s.top - s.h[k]);
-      g.lineTo(x1, s.top);
-      g.closePath();
+      fill.moveTo(x0, s.top);
+      line.moveTo(x0, s.top);
+      for (let k = a; k < i; k++) { const x = s.left + k * COL + COL / 2, y = s.top - s.h[k]; fill.lineTo(x, y); line.lineTo(x, y); }
+      fill.lineTo(x1, s.top);
+      line.lineTo(x1, s.top);
+      fill.closePath();
       any = true;
     }
     if (!any) return;
-    g.fillStyle = '#f8fbff';
-    g.fill();
-    g.strokeStyle = 'rgba(140,163,199,0.75)';
-    g.lineWidth = 1;
-    g.stroke();
+    const area = { x: s.left - 2, y: s.top - s.maxH * 1.7 - 4, w: s.n * COL + 4, h: s.maxH * 1.7 + 6 };
+    occluded(w, area, () => {
+      g.globalAlpha = 1;
+      g.fillStyle = '#f8fbff';
+      g.fill(fill);
+      g.strokeStyle = 'rgba(140,163,199,0.75)';
+      g.lineWidth = 1;
+      g.stroke(line);
+    });
   }
   function sprite(img, x, y, r, a = 1) { g.globalAlpha = a; g.drawImage(img, x - r, y - r, r * 2, r * 2); }
   function speckles(x, y, r, rot, a) {
@@ -779,74 +1147,77 @@
       g.beginPath(); g.arc(x + Math.cos(an + rot) * d * r * 0.85, y + Math.sin(an + rot) * d * r * 0.85, sz * r, 0, TAU); g.fill();
     }
   }
+  // sprites, the same ones the app uses
+  const SPR = {};
+  for (const n of ['plow', 'box', 'arm', 'nose', 'hat', 'hat_santa', 'hat_beanie', 'hat_bucket', 'scarf', 'scarf_blue', 'scarf_green', 'face', 'face_wink', 'face_grin']) {
+    const im = new Image();
+    im.src = `assets/sprites/${n}.png`;
+    SPR[n] = im;
+  }
+  const ready = im => im.complete && im.naturalWidth > 0;
+  // draws a sprite into a rectangle, optionally mirrored
+  function img(im, l, t, w, h, flip) {
+    if (!ready(im)) return;
+    g.globalAlpha = 1;
+    if (flip) { g.save(); g.translate(l + w, t); g.scale(-1, 1); g.drawImage(im, 0, 0, w, h); g.restore(); }
+    else g.drawImage(im, l, t, w, h);
+  }
+  const aspect = im => (ready(im) ? im.naturalHeight / im.naturalWidth : 1);
+
+  function drawSnowmanArms(st) {
+    const B = st.centers[1], rb = st.balls[1].r, a = rb * 1.45, ah = a * aspect(SPR.arm);
+    img(SPR.arm, B.x + rb * 0.62, B.y + rb * 0.2 - ah, a, ah, false);
+    img(SPR.arm, B.x - rb * 0.62 - a, B.y + rb * 0.2 - ah, a, ah, true);
+  }
   function drawSnowman(st) {
     const B = st.centers[1], rb = st.balls[1].r, Hc = st.centers[2], rh = st.balls[2].r;
-    const scarf = ['#d91f26', '#2673d9', '#26994d', '#9933bf'][st.seed % 4];
     g.globalAlpha = 1;
-    g.strokeStyle = '#6b4524'; g.lineCap = 'round';
-    for (const side of [-1, 1]) {
-      const ax = B.x + side * rb * 0.8, ay = B.y - rb * 0.15, ex = B.x + side * rb * 1.9, ey = B.y - rb * 0.85;
-      g.lineWidth = Math.max(2, rb * 0.08);
-      g.beginPath(); g.moveTo(ax, ay); g.lineTo(ex, ey); g.stroke();
-      g.lineWidth *= 0.7;
-      g.beginPath(); g.moveTo(ex - side * rb * 0.15, ey + rb * 0.1); g.lineTo(ex + side * rb * 0.05, ey - rb * 0.3); g.stroke();
+    for (const k of [-0.42, 0.02, 0.46]) {
+      g.fillStyle = '#1f1f26'; g.beginPath(); g.arc(B.x, B.y + rb * k, Math.max(1.5, rb * 0.085), 0, TAU); g.fill();
+      g.fillStyle = '#73737f'; g.beginPath(); g.arc(B.x - rb * 0.025, B.y + rb * k - rb * 0.025, Math.max(0.6, rb * 0.03), 0, TAU); g.fill();
     }
-    g.fillStyle = '#1f1f29';
-    for (const k of [-0.45, 0, 0.45]) { g.beginPath(); g.arc(B.x, B.y + rb * k, Math.max(1.5, rb * 0.08), 0, TAU); g.fill(); }
-    g.fillStyle = scarf;
-    g.beginPath(); g.roundRect(Hc.x - rh * 0.95, Hc.y + rh * 0.62, rh * 1.9, rh * 0.38, rh * 0.15); g.fill();
-    g.beginPath(); g.roundRect(Hc.x + rh * 0.3, Hc.y + rh * 0.8, rh * 0.38, rh * 0.95, rh * 0.1); g.fill();
-    g.fillStyle = '#1f1f29';
-    for (const side of [-1, 1]) { g.beginPath(); g.arc(Hc.x + side * rh * 0.33, Hc.y - rh * 0.18, Math.max(1.5, rh * 0.1), 0, TAU); g.fill(); }
-    g.fillStyle = '#ff851a';
-    g.beginPath(); g.moveTo(Hc.x, Hc.y - rh * 0.06); g.lineTo(Hc.x + rh * 0.8, Hc.y + rh * 0.1); g.lineTo(Hc.x, Hc.y + rh * 0.16); g.fill();
-    g.fillStyle = '#1f1f29';
-    for (let i = 0; i < 5; i++) { const a = Math.PI * (0.25 + (i / 4) * 0.5); g.beginPath(); g.arc(Hc.x + Math.cos(a) * rh * 0.48, Hc.y + Math.sin(a) * rh * 0.38 + rh * 0.12, Math.max(1, rh * 0.055), 0, TAU); g.fill(); }
-    g.fillStyle = '#18181f';
-    g.fillRect(Hc.x - rh * 0.95, Hc.y - rh * 0.86, rh * 1.9, rh * 0.18);
-    g.fillRect(Hc.x - rh * 0.6, Hc.y - rh * 1.8, rh * 1.2, rh * 1.05);
-    g.fillStyle = scarf;
-    g.fillRect(Hc.x - rh * 0.6, Hc.y - rh * 1.0, rh * 1.2, rh * 0.18);
+    // every snowman gets a random combination of hat, scarf and face
+    const look = st.look || 0;
+    const scarf = SPR[['scarf', 'scarf_blue', 'scarf_green'][Math.floor(look / 4) % 3]];
+    const face = SPR[['face', 'face_wink', 'face_grin'][Math.floor(look / 12) % 3]];
+    const sw = rh * 2.3;
+    img(scarf, Hc.x - sw / 2, Hc.y + rh * 0.62, sw, sw * aspect(scarf), false);
+    const fw = rh * 1.1;
+    img(face, Hc.x - fw / 2, Hc.y - rh * 0.45, fw, fw * aspect(face), false);
+    const nw = rh * 0.8, nh = nw * aspect(SPR.nose);
+    img(SPR.nose, Hc.x - rh * 0.05, Hc.y - nh * 0.35, nw, nh, false);
+    // [sprite, width in head radii, how far down onto the head it sits]
+    const [hn, wk, sink] = [['hat', 2.05, 0.55], ['hat_santa', 2.0, 0.35], ['hat_beanie', 1.9, 0.38], ['hat_bucket', 1.95, 0.5]][look % 4];
+    const hw = rh * wk, hh = hw * aspect(SPR[hn]);
+    img(SPR[hn], Hc.x - hw / 2, Hc.y - rh * sink - hh, hw, hh, false);
   }
   function drawBox() {
     const { x, y, w, h } = box;
+    const iw = w * 1.08, ih = iw * aspect(SPR.box);
+    img(SPR.box, x - iw / 2, y - ih, iw, ih, false);
+    if (fw.left > 0 || fw.rockets.length) {
+      g.globalCompositeOperation = 'lighter';
+      sprite(glowSprites[1], x + w * 0.28, y - h - 2, 6 + 3 * Math.sin(time * 25), 1);
+      g.globalCompositeOperation = 'source-over';
+    }
     g.globalAlpha = 1;
-    ['#cc3333', '#33cc55', '#9944dd', '#33bbcc'].forEach((c, k) => {
-      const tx = x - w * 0.33 + k * w * 0.22, th = h * (0.3 + 0.1 * ((k * 7) % 3));
-      g.fillStyle = c; g.fillRect(tx - w * 0.08, y - h - th, w * 0.16, th + 2);
-      g.fillStyle = '#261a1a'; g.fillRect(tx - w * 0.06, y - h - th, w * 0.12, 3);
-    });
-    g.fillStyle = '#c71f29'; g.beginPath(); g.roundRect(x - w / 2, y - h, w, h, 4); g.fill();
-    g.fillStyle = '#ffd140'; g.fillRect(x - w * 0.07, y - h, w * 0.14, h); g.fillRect(x - w / 2, y - h * 0.55, w, h * 0.13);
     g.font = '600 12px Manrope, sans-serif'; g.textAlign = 'center';
-    g.fillStyle = 'rgba(5,10,25,0.7)'; g.fillText(countdown(), x + 1, y - h - 22);
-    g.fillStyle = '#fff4d6'; g.fillText(countdown(), x, y - h - 23);
+    g.fillStyle = 'rgba(5,10,25,0.7)'; g.fillText(countdown(), x + 1, y - ih - 9);
+    g.fillStyle = '#fff4d6'; g.fillText(countdown(), x, y - ih - 10);
   }
   function drawPlow() {
-    const p = plow, d = p.dir, X = lx => p.x + d * lx, Y = ly => FLOOR - ly;
-    const rect = (l, t, r, b, c, rad = 0) => { g.fillStyle = c; g.beginPath(); g.roundRect(Math.min(X(l), X(r)), Y(t), Math.abs(X(r) - X(l)), Y(b) - Y(t), rad); g.fill(); };
-    g.globalAlpha = 1;
-    rect(-72, 26, 62, 14, '#2e2e33', 2);
-    rect(-72, 60, 4, 24, '#ff8c14', 4);
-    for (let k = 0; k < 4; k++) rect(-64 + k * 18, 54, -54 + k * 18, 30, '#e6730d', 2);
-    rect(6, 66, 58, 24, '#ff8c14', 6);
-    rect(22, 60, 52, 42, '#8cccf2', 3);
-    rect(26, 72, 38, 66, '#2e2e33', 2);
-    const blink = Math.sin(p.t * 7) > 0;
-    rect(27, 78, 37, 71, blink ? '#ffbf1a' : '#99590d', 3);
-    if (blink) { g.globalCompositeOperation = 'lighter'; sprite(glowSprites[1], X(32), Y(75), 22, 0.9); g.globalCompositeOperation = 'source-over'; }
-    g.globalAlpha = 1;
+    const p = plow, pw = 2 * 88, ph = pw * aspect(SPR.plow);
+    const bounce = Math.abs(Math.sin(p.t * 13)) * 1.2;
+    const t = FLOOR - ph - bounce + 2;
     const load = Math.min(16, Math.sqrt(p.load) * 0.7);
-    if (load > 1) sprite(ballSprite, X(90) + d * load * 0.4, FLOOR - load * 0.6, load);
-    g.globalAlpha = 1;
-    g.fillStyle = '#f2cc1a';
-    g.beginPath(); g.moveTo(X(74), Y(34)); g.lineTo(X(84), Y(30)); g.lineTo(X(88), Y(2)); g.lineTo(X(76), Y(1)); g.fill();
-    for (const lx of [-48, 36]) {
-      g.fillStyle = '#141417'; g.beginPath(); g.arc(X(lx), Y(12), 12, 0, TAU); g.fill();
-      g.fillStyle = '#9a9a9e'; g.beginPath(); g.arc(X(lx), Y(12), 6, 0, TAU); g.fill();
-      g.strokeStyle = '#4d4d52'; g.lineWidth = 1.5;
-      for (let k = 0; k < 3; k++) { const a = p.wheel * d + k * 2.094; g.beginPath(); g.moveTo(X(lx), Y(12)); g.lineTo(X(lx) + Math.cos(a) * 5, Y(12) + Math.sin(a) * 5); g.stroke(); }
+    if (load > 1) sprite(ballSprite, p.x + p.dir * (pw / 2 + load * 0.4), FLOOR - load * 0.6, load);
+    img(SPR.plow, p.x - pw / 2, t, pw, ph, p.dir < 0);
+    if (Math.sin(p.t * 7) > 0) {
+      g.globalCompositeOperation = 'lighter';
+      sprite(glowSprites[1], p.x + p.dir * 0.03 * pw, t + ph * 0.06, 20, 0.9);
+      g.globalCompositeOperation = 'source-over';
     }
+    g.globalAlpha = 1;
   }
 
   function draw() {
@@ -854,18 +1225,24 @@
     // splats stuck on windows, clipped to the window
     for (const m of marks) {
       const w = m.win, a = Math.min(1, m.life / 3) * 0.95;
-      const topmost = zSorted().find(o => w.x + m.rx >= o.x && w.x + m.rx < o.x + o.w && w.y + m.ry >= o.y && w.y + m.ry < o.y + o.h);
-      if (topmost !== w) continue;
-      g.save(); g.beginPath(); g.rect(w.x, w.y, w.w, w.h); g.clip();
-      for (const b of m.blobs) sprite(ballSprite, w.x + m.rx + b.x * m.r, w.y + m.ry + b.y * m.r, b.s * m.r, a);
-      g.restore();
+      occluded(w, { x: w.x, y: w.y, w: w.w, h: w.h }, () => {
+        for (const b of m.blobs) sprite(ballSprite, w.x + m.rx + b.x * m.r, w.y + m.ry + b.y * m.r, b.s * m.r, a);
+      });
     }
     g.globalAlpha = 1;
-    for (const s of surfaces()) drawDrift(s);
+    for (const w of [...wins].sort((a, b) => a.z - b.z)) drawDrift(w.surf, w);
+    drawDrift(floor, null);
     for (const st of stacks) {
-      if (!st.visible) continue;
-      st.centers.forEach((c, j) => { sprite(ballSprite, c.x, c.y, st.balls[j].r); speckles(c.x, c.y, st.balls[j].r, 0, 0.25); });
-      if (st.balls.length >= 3 && st.centers.length >= 3) drawSnowman(st);
+      if (!st.centers.length) continue; // a covered base is fine: windows in front clip it
+      let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+      st.centers.forEach((c, j) => { const R = st.balls[j].r; l = Math.min(l, c.x - R * 2.2); r = Math.max(r, c.x + R * 2.2); t = Math.min(t, c.y - R * 2); b = Math.max(b, c.y + R * 1.9); });
+      const body = () => {
+        if (st.balls.length >= 3 && st.centers.length >= 3) drawSnowmanArms(st); // behind the body
+        st.centers.forEach((c, j) => { sprite(ballSprite, c.x, c.y, st.balls[j].r); speckles(c.x, c.y, st.balls[j].r, 0, 0.25); });
+        if (st.balls.length >= 3 && st.centers.length >= 3) drawSnowman(st);
+      };
+      // a carried snowman is in the hand, in front of every window
+      if (st.carried) body(); else occluded(st.surf || null, { x: l, y: t, w: r - l, h: b - t }, body);
     }
     if (box) drawBox();
     if (plow) drawPlow();
@@ -891,6 +1268,33 @@
     for (const r of fw.rockets) { sprite(glowSprites[7], r.x, r.y, 4.5, 1); sprite(glowSprites[r.c], r.x, r.y, 9, 0.5); }
     g.globalCompositeOperation = 'source-over';
     g.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- Tems on a window
+  // The picture's "ledge" (where her hands and seat rest) is this far down the image.
+  const SEAT = 0.54;
+  const sitter = document.getElementById('sitter');
+  const sitWin = sitter && wins.find(w => w.el.dataset.title === sitter.dataset.win);
+  function placeSitter() {
+    if (!sitter || !sitWin || !sitter.naturalWidth) return;
+    const w = sitWin;
+    const sw = sitter.offsetWidth, sh = sw * (sitter.naturalHeight / sitter.naturalWidth);
+    // sit near the left end of the window's top edge
+    const cx = w.x + sw * 0.5 + 18;
+    // she sits on the window edge itself, fixed to it: only the window moves her
+    const seat = w.y - 4;
+    const left = Math.round(cx - sw / 2), top = Math.round(seat - sh * SEAT);
+    sitter.style.transform = `translate(${left}px, ${top}px)`;
+    // windows in front of hers cover her exactly like they cover the snow
+    const area = { x: left - 20, y: top - 20, w: sw + 40, h: sh + 40 };
+    const parts = subtract(area, frontOf(w));
+    const key = parts.map(p => `${p.x | 0},${p.y | 0},${p.w | 0},${p.h | 0}`).join(';');
+    if (key !== sitter._clipKey) {
+      sitter._clipKey = key;
+      if (parts.length === 1 && parts[0] === area) sitter.style.clipPath = '';
+      else if (!parts.length) sitter.style.clipPath = 'inset(50%)';
+      else sitter.style.clipPath = `path('${parts.map(p => `M${p.x - left} ${p.y - top}h${p.w}v${p.h}h${-p.w}Z`).join(' ')}')`;
+    }
   }
 
   // ---------------------------------------------------------------- loop and controls
@@ -934,8 +1338,10 @@
     {
       time += dt;
       syncWindows(dt);
+      pushSnow();
       visibility();
       updateHeld(dt);
+      updateCarry(dt);
       spawnFlakes(dt, false);
       updateParticles(dt);
       for (const s of surfaces()) relax(s);
@@ -951,6 +1357,7 @@
       updateBox();
       updateFireworks(dt);
       draw();
+      placeSitter();
       if (clockEl) { const d = new Date(); clockEl.textContent = d.toTimeString().slice(0, 5); }
     }
   }
@@ -958,11 +1365,21 @@
 
   // read-only peek for automated checks
   window.__snowie = {
+    // debug: give every snowman a particular look (hat + 4 * scarf + 12 * face)
+    setLook(v) { for (const st of stacks) st.look = v; },
+    // debug: put a stack of n balls (3 = a snowman) on window i, or on the floor when i < 0
+    addStack(i, n = 3) {
+      const w = i >= 0 ? wins[i] : null, s = w ? w.surf : floor;
+      const balls = Array.from({ length: n }, (_, k) => { const r = [22, 16, 11][k] || 9; return { r, m: Math.PI * (r / 1.5) ** 2, off: { x: 0, y: 0 } }; });
+      stacks.push({ surf: w, x: (s.n * COL) / 2, balls, centers: [], visible: true, seed: 0, look: (Math.random() * 1e9) | 0 });
+    },
     get state() {
       return {
         balls: balls.length, stacks: stacks.map(st => st.balls.length), held: !!held, parts: parts.length,
         marks: marks.length, sparks: fw.sparks.length, plow: !!plow,
         ballPos: balls.map(b => [Math.round(b.x), Math.round(b.y), Math.round(b.r), Math.round(b.vx), Math.round(b.vy)]),
+        jerk: wins.map(w => Math.round(w.jerk)),
+        snow: wins.map(w => Math.round(w.surf.h.reduce((a, b) => a + b, 0))),
         stackPos: stacks.map(st => st.centers.map((c, j) => [Math.round(c.x), Math.round(c.y), Math.round(st.balls[j].r)])),
       };
     },

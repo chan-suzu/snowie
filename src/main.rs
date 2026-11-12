@@ -35,6 +35,23 @@ static PLOW: AtomicBool = AtomicBool::new(false);
 static FIREWORKS: AtomicBool = AtomicBool::new(false);
 static DISPLAY_CHANGED: AtomicBool = AtomicBool::new(false);
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(u32::MAX);
+/// Set by the WinEvent hook when any top-level window moves or resizes: wakes the idle wait,
+/// so a drag gets a frame at once instead of at the next idle tick.
+static WINDOW_MOVED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "system" fn win_event(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _event: u32,
+    hwnd: HWND,
+    id_object: i32,
+    id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    if id_object == OBJID_WINDOW.0 && id_child == 0 && !hwnd.is_invalid() && unsafe { GetAncestor(hwnd, GA_ROOT) } == hwnd {
+        WINDOW_MOVED.store(true, Ordering::Relaxed);
+    }
+}
 static MUSIC_PCM: OnceLock<std::sync::Arc<Vec<i16>>> = OnceLock::new();
 
 fn edit_config(f: impl FnOnce(&mut Config)) {
@@ -178,6 +195,7 @@ struct SoundState {
     rendering: bool,
     volumes: (f32, f32),
     engine: f32,
+    engine_pan: f32,
 }
 
 impl SoundState {
@@ -233,9 +251,12 @@ impl SoundState {
             })
             .unwrap_or((0.0, 0.0));
         let level = if cfg.sounds { level } else { 0.0 };
-        if (level - self.engine).abs() > 0.03 || (level == 0.0 && self.engine != 0.0) {
+        // follow the truck across the screen: the mixer glides between these updates
+        let p = pan(at);
+        if (level - self.engine).abs() > 0.01 || (p - self.engine_pan).abs() > 0.005 || (level == 0.0 && self.engine != 0.0) {
             self.engine = level;
-            self.audio.engine(level, pan(at));
+            self.engine_pan = p;
+            self.audio.engine(level, p);
         }
     }
 }
@@ -339,6 +360,20 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
         let mut hz = refresh_hz();
         let _ = ShowWindow(overlay, SW_SHOWNOACTIVATE);
         hook::spawn();
+        // window moves are reported to this thread's message queue (out of context)
+        let _move_hook = windows::Win32::UI::Accessibility::SetWinEventHook(
+            EVENT_OBJECT_LOCATIONCHANGE,
+            EVENT_OBJECT_LOCATIONCHANGE,
+            None,
+            Some(win_event),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+        );
+        let mut moving = false;
+        // debug: SNOWIE_LEAD=<frames> overrides how far ahead moving windows' snow is drawn
+        let lead_frames: f32 = std::env::var("SNOWIE_LEAD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.35);
+        let mut next_idle = Instant::now();
 
         // debug: pretend New Year comes in N seconds (SNOWIE_NY_IN=15)
         let fake_ny: Option<(Instant, i64)> =
@@ -364,6 +399,7 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
             rendering: false,
             volumes: (-1.0, -1.0),
             engine: 0.0,
+            engine_pan: 0.0,
         };
 
         'main: loop {
@@ -428,6 +464,27 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
             }
             was_hidden = false;
 
+            // Idle pacing: draw at the fps setting, but wake up the moment a window starts moving
+            // (WinEvent messages end the wait), so a drag never waits for the next idle tick.
+            if !moving {
+                loop {
+                    let now = Instant::now();
+                    if now >= next_idle || WINDOW_MOVED.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let ms = ((next_idle - now).as_secs_f32() * 1000.0).ceil().max(1.0) as u32;
+                    MsgWaitForMultipleObjectsEx(None, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        if msg.message == WM_QUIT {
+                            break 'main;
+                        }
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+            }
+            WINDOW_MOVED.store(false, Ordering::Relaxed);
             // sample window positions right before drawing, once the swap chain is ready
             renderer.wait();
             let t_ready = Instant::now();
@@ -463,15 +520,15 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
                 w.set_popups(popups);
                 w.update(dt, windows, inputs, clock);
                 sound.frame(&mut w, &cfg);
-                // full refresh rate while windows move or a ball is in play, ~fps setting otherwise
-                let base = ((hz / cfg.fps.max(15) as f32).round() as u32).clamp(1, 4);
-                if w.in_motion() {
-                    renderer.sync = 1;
-                    w.lead = 1.0 / hz;
-                } else {
-                    renderer.sync = base;
-                    w.lead = 0.0;
-                }
+                // every present waits for one vblank only (lowest latency); at rest the idle wait
+                // above spaces frames to the fps setting. While windows move or a ball is in play
+                // we draw every vblank and draw moving windows' snow where they will be when the
+                // frame reaches the screen: measured ~0.35 of a refresh period (scripts: drag a window
+                // at constant speed and compare the drift edge with the window edge in screenshots).
+                renderer.sync = 1;
+                moving = w.in_motion();
+                w.lead = if moving { lead_frames / hz } else { 0.0 };
+                next_idle = t_ready + Duration::from_secs_f32(1.0 / cfg.fps.max(15) as f32);
                 t_upd1 = Instant::now();
                 prof.scene = profiler::Scene {
                     particles: w.particles.len(),

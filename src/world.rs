@@ -60,8 +60,16 @@ pub struct Surface {
     pub left: i32,
     pub top: i32,
     pub heights: Vec<f32>,
+    /// columns whose base line is open to the sky: flakes land and the mouse grabs only there.
+    /// Windows in front hide the drawn drift by clipping, not through this.
     pub visible: Vec<bool>,
+    /// no snow is shown on this surface at all (a window pressed against the top of the
+    /// screen, or snow on windows turned off)
+    pub hidden: bool,
     pub max_h: f32,
+    /// phase of the mounds a full drift settles into (see `cap`), and the display scale
+    wave: f32,
+    unit: f32,
     /// estimated velocity of the window, px/s (used to predict its position when drawing)
     pub vel: V2,
     /// smoothed acceleration magnitude, px/s²: high when the window is being shaken
@@ -100,7 +108,10 @@ impl Surface {
             top,
             heights: vec![0.0; n],
             visible: vec![walls; n],
+            hidden: false,
             max_h,
+            wave: ((left as u32).wrapping_mul(2654435761) ^ (top as u32).wrapping_mul(40503)) as f32 * 1e-6,
+            unit: 1.0,
             vel: V2::ZERO,
             jerk: 0.0,
             track: V2::ZERO,
@@ -162,6 +173,15 @@ impl Surface {
         self.top as f32 - self.heights[c]
     }
 
+    /// How high the drift can grow at column i. It is not one flat limit: it rolls gently along
+    /// the window, so a full drift is a row of soft mounds instead of a shelf cut off at the top.
+    fn cap(&self, i: usize) -> f32 {
+        let x = i as f32 / self.unit;
+        let p = self.wave;
+        let n = 0.55 * (x / 61.0 + p).sin() + 0.3 * (x / 27.0 + p * 1.7).sin() + 0.15 * (x / 13.0 + p * 2.9).sin();
+        self.max_h * (0.8 + 0.2 * n)
+    }
+
     fn deposit(&mut self, x: f32, mass: f32, spread: f32) {
         let Some(c) = self.col(x) else { return };
         let n = self.heights.len() as i32;
@@ -176,8 +196,11 @@ impl Surface {
         for k in -w..=w {
             let i = c as i32 + k;
             if i >= 0 && i < n {
-                let h = &mut self.heights[i as usize];
-                *h = (*h + mass * (w + 1 - k.abs()) as f32 / wsum).min(self.max_h);
+                // growth slows down well before the cap, so the top rounds off instead of flattening
+                let cap = self.cap(i as usize);
+                let h = self.heights[i as usize];
+                let room = ((cap - h) / (0.35 * cap)).clamp(0.0, 1.0);
+                self.heights[i as usize] = (h + mass * room * (w + 1 - k.abs()) as f32 / wsum).min(self.max_h);
             }
         }
         self.mark((c as i32 - w).max(0) as usize, (c as i32 + w + 1) as usize, false);
@@ -205,10 +228,22 @@ impl Surface {
     }
 
     /// Angle-of-repose settling plus a little smoothing; overhangs at window edges spill off.
-    fn relax(&mut self, slope: f32, lip: f32, flip: bool) {
+    fn relax(&mut self, slope: f32, lip: f32, flip: bool, unit: f32) {
         let n = self.heights.len();
         if n < 2 {
             return;
+        }
+        self.unit = unit;
+        // snow piled above its cap (pushed, joined across a seam, smoothed in) slowly settles
+        // back down, so the mounds keep their shape instead of levelling out over time
+        let low = self.max_h * 0.6;
+        for i in 0..n {
+            if self.heights[i] > low {
+                let cap = self.cap(i);
+                if self.heights[i] > cap + 0.05 {
+                    self.heights[i] -= (self.heights[i] - cap) * 0.01;
+                }
+            }
         }
         let h = &mut self.heights;
         // biggest change per segment this pass, so settled parts stop asking to be redrawn
@@ -308,9 +343,22 @@ pub struct StackBall {
     pub off: V2,
 }
 
+/// A stack (a snowman, say) picked up by its bottom ball and carried around whole.
+pub struct Carried {
+    pub stack: Stack,
+    /// where the bottom ball touches the ground, where the cursor wants it, and its velocity
+    foot: V2,
+    target: V2,
+    vel: V2,
+    /// from the cursor to the foot, fixed at the grab
+    grab: V2,
+}
+
 /// Balls resting on a drift, one on top of another. Three of them make a snowman.
 pub struct Stack {
     surf: SurfId,
+    /// random choice of hat, scarf and face, picked when the first ball lands
+    pub look: u32,
     /// position along the surface, relative to its left edge
     x: f32,
     pub balls: Vec<StackBall>,
@@ -318,10 +366,17 @@ pub struct Stack {
     pub centers: Vec<V2>,
     pub visible: bool,
     pub vel: V2,
-    pub seed: u32,
 }
 
 impl Stack {
+    /// The window this stack rests on (None for the taskbar).
+    pub fn window(&self) -> Option<isize> {
+        match self.surf {
+            SurfId::Win(h) => Some(h),
+            SurfId::Floor(_) => None,
+        }
+    }
+
     pub fn is_snowman(&self) -> bool {
         self.balls.len() >= 3
     }
@@ -402,6 +457,7 @@ pub struct World {
     pub floors: Vec<Surface>,
     pub particles: Vec<Particle>,
     pub held: Option<Held>,
+    pub carried: Option<Carried>,
     pub balls: Vec<Ball>,
     /// sounds to play this frame, with the screen x they come from
     pub sounds: Vec<(Sfx, f32)>,
@@ -417,6 +473,8 @@ pub struct World {
     pub time: f32,
     /// debug: start with drifts already in place (SNOWIE_PRESNOW)
     presnow: bool,
+    /// debug (SNOWIE_SNOWMAN=x,y): a snowman is put on the first drift below that screen point
+    debug_snowman: Option<V2>,
     frame: u64,
     next_plow: f32,
     plow_dir: f32,
@@ -441,6 +499,7 @@ impl World {
             floors: Vec::new(),
             particles: Vec::new(),
             held: None,
+            carried: None,
             balls: Vec::new(),
             sounds: Vec::new(),
             stacks: Vec::new(),
@@ -453,6 +512,10 @@ impl World {
             lead: 0.0,
             time: 0.0,
             presnow: std::env::var_os("SNOWIE_PRESNOW").is_some(),
+            debug_snowman: std::env::var("SNOWIE_SNOWMAN").ok().and_then(|v| {
+                let (x, y) = v.split_once(',')?;
+                Some(V2(x.trim().parse().ok()?, y.trim().parse().ok()?))
+            }),
             frame: 0,
             plow_dir: 1.0,
             last_ny_secs: -1,
@@ -550,6 +613,7 @@ impl World {
     /// True while something moves fast enough that we should draw at the full refresh rate.
     pub fn in_motion(&self) -> bool {
         self.held.is_some()
+            || self.carried.is_some()
             || !self.balls.is_empty()
             || self.win_surf.iter().any(|(hwnd, s)| {
                 // only windows that carry something of ours need smooth tracking
@@ -580,6 +644,15 @@ impl World {
         self.windows.iter().rev().filter_map(|w| self.win_surf.get(&w.hwnd)).chain(self.floors.iter())
     }
 
+    /// Rectangles of the windows in front of `hwnd` (topmost first). Snow that belongs to
+    /// `hwnd` must not be drawn over them.
+    pub fn front_of(&self, hwnd: isize) -> Vec<RectI> {
+        match self.windows.iter().position(|w| w.hwnd == hwnd) {
+            Some(i) => self.windows[..i].iter().map(|w| w.rect).collect(),
+            None => Vec::new(),
+        }
+    }
+
     pub fn window_vel(&self, hwnd: isize) -> V2 {
         self.win_surf.get(&hwnd).map_or(V2::ZERO, |s| s.vel)
     }
@@ -591,12 +664,14 @@ impl World {
     pub fn update(&mut self, dt: f32, windows: Vec<WinInfo>, inputs: Vec<Input>, clock: Clock) {
         self.time += dt;
         self.frame += 1;
-        self.sync_windows(windows, dt);
+        let moves = self.sync_windows(windows, dt);
         self.compute_visibility();
+        self.push_snow(&moves);
         for i in inputs {
             self.handle_input(i);
         }
         self.update_held(dt);
+        self.update_carried(dt);
         self.spawn_flakes(dt);
         self.update_particles(dt);
         self.relax_surfaces();
@@ -610,7 +685,8 @@ impl World {
 
     // ---------------------------------------------------------------- windows
 
-    fn sync_windows(&mut self, windows: Vec<WinInfo>, dt: f32) {
+    fn sync_windows(&mut self, windows: Vec<WinInfo>, dt: f32) -> Vec<(isize, V2)> {
+        let mut moves = Vec::new();
         let s = self.scale;
         let max_h = self.cfg.window_drift * s;
         for surf in self.win_surf.values_mut() {
@@ -644,6 +720,7 @@ impl World {
             surf.ceiling = ceiling;
             let old = surf.rect;
             if old != r {
+                moves.push((w.hwnd, V2((r.l - old.l) as f32, (r.t - old.t) as f32)));
                 let new_w = r.w().max(1) as usize;
                 let old_w = surf.heights.len();
                 let right_anchor = old.r == r.r && old.l != r.l;
@@ -672,10 +749,11 @@ impl World {
                 surf.top = r.t;
                 surf.rect = r;
             }
-            // velocity and acceleration over the last ~60 ms: the window may move less often than we draw
+            // velocity and acceleration over the last ~35 ms: the window may move less often than we draw,
+            // and a short window makes the prediction catch up quickly when a drag starts
             let now = self.time;
             surf.hist.push_back((now, surf.track, surf.vel));
-            while surf.hist.len() > 2 && now - surf.hist[1].0 >= 0.06 {
+            while surf.hist.len() > 2 && now - surf.hist[1].0 >= 0.035 {
                 surf.hist.pop_front();
             }
             let (t0, p0, v0) = surf.hist[0];
@@ -705,6 +783,87 @@ impl World {
             }
         }
         self.windows = windows;
+        moves
+    }
+
+    /// A moving window works like a snowplow blade on every other drift: snow that ends up inside
+    /// the window (or inside the snow on its top) is shoved out ahead of it, in the direction of
+    /// motion (to the nearer side when it moves up or down). Pushed past the end of a window, the
+    /// snow falls off. Snowmen in the way get shoved along too.
+    fn push_snow(&mut self, moves: &[(isize, V2)]) {
+        let s = self.scale;
+        for &(hwnd, d) in moves {
+            let Some(a) = self.win_surf.get(&hwnd) else { continue };
+            let r = a.rect;
+            let ends = a.heights.first().copied().unwrap_or(0.0).max(a.heights.last().copied().unwrap_or(0.0));
+            let peak = a.heights.iter().fold(0.0f32, |m, h| m.max(*h));
+            // Only a drift pushes a drift: the window's top edge with its own snow, moving sideways,
+            // against snow lying at about the same level. A window passing in front of other
+            // snow (up, down or at another height) just hides it.
+            // The direction comes from the smoothed velocity: a hand drag jitters, and a single
+            // sideways step while the window rises past another drift must not count as a push.
+            let v = a.vel;
+            let sideways = v.x.abs() >= 150.0 * s && v.x.abs() >= v.y.abs() * 2.0;
+            // a jump (snapping to a screen edge, maximize, restore) is not a drag through the snow
+            let jump = d.x.abs() > 150.0 * s;
+            if !sideways || jump || d.x == 0.0 || d.x.signum() != v.x.signum() {
+                continue;
+            }
+            let dir = d.x.signum();
+            let band = (r.t as f32 - ends.max(peak * 0.6) - 1.0, r.t as f32 + 6.0 * s);
+            // the blade is the strip the leading edge swept this frame: snow already under the
+            // window (it arrived from below or above) stays where it is, hidden behind it
+            let sweep = d.x.abs().ceil() as i32 + (2.0 * s).ceil() as i32;
+            let r = if dir > 0.0 { RectI { l: r.r - sweep, ..r } } else { RectI { r: r.l + sweep, ..r } };
+            let mut spills: Vec<(V2, f32, f32)> = Vec::new();
+            // only windows behind the moving one: a window in front of it does not touch it
+            let behind: Vec<isize> = match self.windows.iter().position(|w| w.hwnd == hwnd) {
+                Some(i) => self.windows[i + 1..].iter().map(|w| w.hwnd).collect(),
+                None => Vec::new(),
+            };
+            for (k, surf) in self.win_surf.iter_mut() {
+                if behind.contains(k) {
+                    plow(surf, r, band, dir, &mut spills);
+                }
+            }
+            for (pos, m, side) in spills {
+                let n = ((m / 3.0).ceil() as usize).clamp(1, 12);
+                for _ in 0..n {
+                    let p = pos + V2(side * (1.0 + self.rng.f32() * 5.0) * s, -(4.0 + self.rng.f32() * 10.0) * s);
+                    let v = V2(side * (30.0 + self.rng.f32() * 90.0) * s, -(20.0 + self.rng.f32() * 60.0) * s);
+                    let c = Particle::chunk(p, v, m / n as f32, s, &mut self.rng);
+                    if self.particles.len() < MAX_PARTICLES {
+                        self.particles.push(c);
+                    }
+                }
+            }
+            // snowmen and resting balls in the way are shoved along
+            let places: Vec<Option<(i32, i32)>> =
+                self.stacks
+                    .iter()
+                    .map(|st| {
+                        if st.surf == SurfId::Win(hwnd) {
+                            None
+                        } else {
+                            self.surf_opt(st.surf).map(|f| (f.left, f.top))
+                        }
+                    })
+                    .collect();
+            for (st, place) in self.stacks.iter_mut().zip(places) {
+                let Some((left, top)) = place else { continue };
+                if st.window().is_some_and(|h| !behind.contains(&h)) {
+                    continue;
+                }
+                let rb = st.balls.first().map_or(0.0, |b| b.r);
+                let x = left as f32 + st.x;
+                let top = top as f32;
+                if top <= band.0 || top - rb * 2.0 >= band.1 || x + rb < r.l as f32 || x - rb > r.r as f32 {
+                    continue;
+                }
+                let to_right = dir > 0.0 || (dir == 0.0 && x >= (r.l + r.r) as f32 / 2.0);
+                st.x = if to_right { r.r as f32 + rb } else { r.l as f32 - rb } - left as f32;
+            }
+        }
     }
 
     fn compute_visibility(&mut self) {
@@ -732,15 +891,12 @@ impl World {
                     }
                 }
             }
-            if vis != surf.visible {
-                let n = vis.len();
-                for k in 0..n.div_ceil(SEG) {
-                    let (a, b) = (k * SEG, ((k + 1) * SEG).min(n));
-                    if vis[a..b] != surf.visible[a..b] {
-                        surf.mark(a, b, true);
-                    }
-                }
-                surf.visible = vis;
+            surf.visible = vis;
+            let hidden = surf.ceiling || !self.cfg.snow_on_windows;
+            if hidden != surf.hidden {
+                surf.hidden = hidden;
+                let n = surf.heights.len();
+                surf.mark(0, n, true);
             }
         }
     }
@@ -791,7 +947,7 @@ impl World {
     /// Called from the mouse hook on left button down. Returns true if the click hit something
     /// of ours (the click is then swallowed).
     pub fn try_grab(&mut self, p: V2) -> bool {
-        if !self.active || self.held.is_some() {
+        if !self.active || self.held.is_some() || self.carried.is_some() {
             return false;
         }
         let s = self.scale;
@@ -807,14 +963,24 @@ impl World {
                 return true;
             }
         }
-        // a ball from a stack or a snowman: always take the top one
+        // a stack or a snowman: grabbed by the bottom ball it moves whole, anywhere else the top
+        // ball comes off
         for i in 0..self.stacks.len() {
             let st = &self.stacks[i];
             if !st.visible {
                 continue;
             }
-            let hit = st.centers.iter().zip(&st.balls).any(|(c, b)| (p - *c).len() <= b.r);
-            if hit {
+            let Some(j) = st.centers.iter().zip(&st.balls).position(|(c, b)| (p - *c).len() <= b.r) else {
+                continue;
+            };
+            if j == 0 && st.balls.len() >= 2 {
+                let st = self.stacks.remove(i);
+                let foot = st.centers[0] + V2(0.0, st.balls[0].r * 0.85);
+                self.carried = Some(Carried { foot, target: foot, vel: V2::ZERO, grab: foot - p, stack: st });
+                self.sounds.push((Sfx::Grab, p.x));
+                return true;
+            }
+            {
                 let st = &mut self.stacks[i];
                 let c = *st.centers.last().unwrap();
                 let b = st.balls.pop().unwrap();
@@ -845,6 +1011,20 @@ impl World {
     }
 
     fn handle_input(&mut self, input: Input) {
+        if self.carried.is_some() {
+            match input {
+                Input::Move(p) => {
+                    let c = self.carried.as_mut().unwrap();
+                    c.target = p + c.grab;
+                }
+                Input::Up(p) => {
+                    let mut c = self.carried.take().unwrap();
+                    c.target = p + c.grab;
+                    self.put_down(c);
+                }
+            }
+            return;
+        }
         let Some(mut h) = self.held.take() else { return };
         let s = self.scale;
         match input {
@@ -897,6 +1077,68 @@ impl World {
                     }
                 }
             }
+        }
+    }
+
+    /// The carried stack trails the cursor, slower the heavier it is; the upper balls sway behind.
+    fn update_carried(&mut self, dt: f32) {
+        let Some(c) = self.carried.as_mut() else { return };
+        let s = self.scale;
+        let r0 = c.stack.balls[0].r;
+        let mass: f32 = c.stack.balls.iter().map(|b| b.mass).sum();
+        let rate = 22.0 / (1.0 + (ball_radius(mass, s) / (45.0 * s)).powi(2));
+        let prev = c.foot;
+        c.foot += (c.target - c.foot) * (1.0 - (-rate * dt).exp());
+        c.vel = c.vel * 0.6 + (c.foot - prev) / dt.max(1e-4) * 0.4;
+        let st = &mut c.stack;
+        st.vel = c.vel;
+        st.centers.clear();
+        let mut y = c.foot.y + r0 * 0.15;
+        let ease = (-10.0 * dt).exp();
+        for (k, b) in st.balls.iter_mut().enumerate() {
+            let overlap = if k == 0 { 1.0 } else { 0.8 };
+            y -= b.r * overlap;
+            // upper balls lean against the motion a little
+            let lean = V2((-c.vel.x * 0.006 * k as f32 * s).clamp(-b.r * 0.35, b.r * 0.35), 0.0);
+            b.off = lean + (b.off - lean) * ease;
+            st.centers.push(V2(c.foot.x, y) + b.off);
+            y -= b.r * 0.8;
+        }
+    }
+
+    /// Sets a carried stack down on the first drift below it; over nothing it falls apart.
+    fn put_down(&mut self, c: Carried) {
+        let s = self.scale;
+        let mut st = c.stack;
+        let r0 = st.balls[0].r;
+        let foot = c.foot;
+        let landing = self.find_landing(foot.x, foot.y - r0 * 0.5, self.vrect.b as f32 + 1e4, false);
+        let place = landing.and_then(|id| self.surf_opt(id).map(|f| (id, f.left, f.col(foot.x).map(|k| f.surface_y(k)))));
+        if let Some((id, left, Some(sy))) = place {
+            st.surf = id;
+            st.x = foot.x - left as f32;
+            // the balls ease from where they are down onto the drift instead of jumping
+            let mut y = sy + r0 * 0.15;
+            for (k, (b, o)) in st.balls.iter_mut().zip(&st.centers).enumerate() {
+                let overlap = if k == 0 { 1.0 } else { 0.8 };
+                y -= b.r * overlap;
+                b.off = *o - V2(foot.x, y);
+                y -= b.r * 0.8;
+            }
+            self.sounds.push((Sfx::Plop(r0 / s), foot.x));
+            self.stacks.push(st);
+            return;
+        }
+        for (b, ctr) in st.balls.iter().zip(&st.centers) {
+            self.balls.push(Ball {
+                pos: *ctr,
+                vel: c.vel * 0.5,
+                mass: b.mass,
+                r: b.r,
+                rot: b.rot,
+                spin: 0.0,
+                ignore: Vec::new(),
+            });
         }
     }
 
@@ -1106,7 +1348,7 @@ impl World {
         }
         let spill_q = 5.0 * s;
         for surf in self.win_surf.values_mut() {
-            surf.relax(slope, lip, flip);
+            surf.relax(slope, lip, flip, s);
             if surf.spill_l >= spill_q {
                 if self.particles.len() < MAX_PARTICLES && !surf.ceiling {
                     let pos = V2(surf.left as f32 - 1.5, surf.top as f32 - surf.heights[0] - 1.0);
@@ -1126,13 +1368,29 @@ impl World {
             }
         }
         for f in &mut self.floors {
-            f.relax(slope * 0.8, lip, flip);
+            f.relax(slope * 0.8, lip, flip, s);
         }
     }
 
     // ---------------------------------------------------------------- stacks & snowmen
 
     fn update_stacks(&mut self, dt: f32) {
+        if let Some(p) = self.debug_snowman {
+            if self.time > 2.0 {
+                self.debug_snowman = None;
+                let s = self.scale;
+                if let Some(id) = self.find_landing(p.x, p.y, self.vrect.b as f32 + 1e4, false) {
+                    let left = self.surf_opt(id).map_or(0, |f| f.left);
+                    let balls = [26.0, 19.0, 13.0]
+                        .iter()
+                        .map(|r| StackBall { r: r * s, mass: PI * (r * s / 1.5).powi(2), rot: 0.0, off: V2::ZERO })
+                        .collect();
+                    let look = self.rng.u32(..);
+                    let (x, vel) = (p.x - left as f32, V2::ZERO);
+                    self.stacks.push(Stack { surf: id, look, x, balls, centers: Vec::new(), visible: true, vel });
+                }
+            }
+        }
         let s = self.scale;
         let mut dropped: Vec<usize> = Vec::new();
         for (i, st) in self.stacks.iter_mut().enumerate() {
@@ -1286,15 +1544,15 @@ impl World {
                         // a gentle landing: the ball sits down on the drift
                         self.sounds.push((Sfx::Plop(b.r / self.scale), b.pos.x));
                         let left = self.surf_opt(id).map_or(0, |s| s.left);
-                        let seed = self.rng.u32(..);
+                        let look = self.rng.u32(..);
                         self.stacks.push(Stack {
                             surf: id,
+                            look,
                             x: b.pos.x - left as f32,
                             balls: vec![StackBall { r: b.r, mass: b.mass, rot: b.rot, off: V2::ZERO }],
                             centers: vec![b.pos],
                             visible: true,
                             vel: surf_vel,
-                            seed,
                         });
                     } else {
                         self.splat(b.pos + off, b.vel, b.mass, b.r, Target::Surface(id));
@@ -1465,7 +1723,8 @@ impl World {
             let emit = (p.load * dt * 3.0).min(p.load);
             p.load -= emit;
             let n = ((emit / 25.0).ceil() as usize).min(5);
-            let chute = V2(p.x + p.dir * 50.0 * s, f.top as f32 - 72.0 * s);
+            // thrown up over the back of the truck, from the dump bed
+            let chute = V2(p.x - p.dir * 40.0 * s, f.top as f32 - 70.0 * s);
             for _ in 0..n {
                 if self.particles.len() >= MAX_PARTICLES {
                     break;
@@ -1502,7 +1761,7 @@ impl World {
         let x = f.left as f32 + self.cfg.box_pos.clamp(0.03, 0.97) * f.heights.len() as f32;
         let y = f.col(x).map_or(f.top as f32, |c| f.surface_y(c) + 3.0 * s);
         let label = (self.cfg.countdown && clock.secs_to_ny > 0).then(|| fx::countdown_text(clock.secs_to_ny));
-        self.firebox = Some(FireBox { pos: V2(x, y), w: 54.0 * s, h: 34.0 * s, label, floor: fi });
+        self.firebox = Some(FireBox { pos: V2(x, y), w: 60.0 * s, h: 50.0 * s, label, floor: fi });
     }
 
     fn update_fireworks(&mut self, dt: f32, clock: Clock) {
@@ -1627,3 +1886,97 @@ fn shed_range(
         i = j;
     }
 }
+
+/// Clears the snow of `surf` that lies inside window rectangle `r` (extended up by its own snow,
+/// `band` = top..bottom) and piles it up next to the window on the side it is moving to.
+fn plow(surf: &mut Surface, r: RectI, band: (f32, f32), dir: f32, spills: &mut Vec<(V2, f32, f32)>) {
+    let top = surf.top as f32;
+    if top <= band.0 || top - surf.max_h * 1.6 >= band.1 {
+        return;
+    }
+    let n = surf.heights.len();
+    let c0 = (r.l - surf.left).max(0) as usize;
+    let c1 = ((r.r - surf.left).max(0) as usize).min(n);
+    if c0 >= c1 {
+        return;
+    }
+    let mid = (c0 + c1) as f32 / 2.0;
+    let (mut left, mut right) = (0.0f32, 0.0f32);
+    for c in c0..c1 {
+        let h = surf.heights[c];
+        if h <= 0.05 || top - h >= band.1 {
+            continue;
+        }
+        if dir > 0.0 || (dir == 0.0 && c as f32 >= mid) {
+            right += h;
+        } else {
+            left += h;
+        }
+        surf.heights[c] = 0.0;
+    }
+    if left + right <= 0.0 {
+        return;
+    }
+    surf.mark(c0, c1, true);
+    dump(surf, c1 as isize, right, 1, spills);
+    dump(surf, c0 as isize - 1, left, -1, spills);
+}
+
+/// Piles pushed snow up just past the blade: a mound that leans on the blade and slopes away
+/// from it, taller and wider the more snow is pushed. What runs off the end of the drift falls.
+fn dump(surf: &mut Surface, c: isize, mut m: f32, side: isize, spills: &mut Vec<(V2, f32, f32)>) {
+    if m <= 0.0 {
+        return;
+    }
+    let n = surf.heights.len() as isize;
+    // gentler than the angle of repose, so the mound stays a mound while the blade moves on
+    let slope = 0.5;
+    let top = surf.max_h * 1.4;
+    let (mut lo, mut hi) = (isize::MAX, isize::MIN);
+    let mut end = c;
+    // a few passes: each one builds the mound for the snow still left over the snow already there
+    for _ in 0..4 {
+        if m <= 0.01 || c < 0 || c >= n {
+            break;
+        }
+        // a triangle of height H and slope k holds H² / k
+        let base = surf.heights[c as usize];
+        let peak = (base + (m * slope).sqrt()).min(top);
+        if peak <= base + 0.01 {
+            break;
+        }
+        for k in 0..n {
+            let i = c + side * k;
+            if i < 0 || i >= n {
+                end = i;
+                break;
+            }
+            let target = peak - slope * k as f32;
+            let h = &mut surf.heights[i as usize];
+            if target <= *h {
+                if target < base - 2.0 {
+                    break;
+                }
+                continue;
+            }
+            let add = m.min(target - *h);
+            *h += add;
+            m -= add;
+            lo = lo.min(i);
+            hi = hi.max(i);
+            if m <= 0.01 {
+                break;
+            }
+        }
+    }
+    if lo <= hi {
+        surf.mark(lo as usize, hi as usize + 1, true);
+    }
+    if m > 0.01 {
+        // ran off the end of the drift (or the mound is as tall as it gets): falls down
+        let at = if end < 0 || end >= n { end } else { c };
+        let x = (surf.left + at.clamp(0, n) as i32) as f32;
+        spills.push((V2(x, surf.top as f32), m, side as f32));
+    }
+}
+

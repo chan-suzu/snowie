@@ -19,7 +19,7 @@ use windows::Win32::Graphics::DirectWrite::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::System::Threading::WaitForSingleObjectEx;
-use windows_numerics::Vector2;
+use windows_numerics::{Matrix3x2, Vector2};
 
 /// Drift drawing is cached as GPU-ready meshes (geometry realizations) and rebuilt only when the
 /// snow changed: at most every `DRIFT_REBUILD` for slow growth, immediately for urgent changes.
@@ -116,6 +116,96 @@ impl GpuTimer {
     }
 }
 
+/// A sprite from assets/sprites, embedded in the exe.
+struct Img {
+    bmp: ID2D1Bitmap1,
+    w: f32,
+    h: f32,
+}
+
+/// Decodes an embedded PNG into a premultiplied BGRA Direct2D bitmap.
+fn load_png(dc: &ID2D1DeviceContext3, bytes: &[u8]) -> Result<Img> {
+    let bad = |_| Error::from(E_FAIL);
+    let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec.read_info().map_err(bad)?;
+    let mut buf = vec![0u8; reader.output_buffer_size().ok_or_else(|| Error::from(E_FAIL))?];
+    let info = reader.next_frame(&mut buf).map_err(bad)?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    let ch = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        png::ColorType::GrayscaleAlpha => 2,
+        _ => 1,
+    };
+    let mut px = vec![0u8; w * h * 4];
+    for i in 0..w * h {
+        let s = &buf[i * ch..i * ch + ch];
+        let (r, g, b, a) = match ch {
+            4 => (s[0], s[1], s[2], s[3]),
+            3 => (s[0], s[1], s[2], 255),
+            2 => (s[0], s[0], s[0], s[1]),
+            _ => (s[0], s[0], s[0], 255),
+        };
+        let m = |c: u8| ((c as u32 * a as u32 + 127) / 255) as u8;
+        px[i * 4] = m(b);
+        px[i * 4 + 1] = m(g);
+        px[i * 4 + 2] = m(r);
+        px[i * 4 + 3] = a;
+    }
+    let bmp = unsafe {
+        dc.CreateBitmap(D2D_SIZE_U { width: w as u32, height: h as u32 }, Some(px.as_ptr() as *const _), (w * 4) as u32, &sprite_props())?
+    };
+    Ok(Img { bmp, w: w as f32, h: h as f32 })
+}
+
+/// An axis-aligned area in render coordinates.
+#[derive(Clone, Copy, PartialEq)]
+struct Area {
+    l: f32,
+    t: f32,
+    r: f32,
+    b: f32,
+}
+
+impl Area {
+    fn rect(&self) -> D2D_RECT_F {
+        D2D_RECT_F { left: self.l, top: self.t, right: self.r, bottom: self.b }
+    }
+}
+
+/// `src` minus every occluder, as a few disjoint rectangles.
+fn subtract(src: Area, occluders: &[Area]) -> Vec<Area> {
+    let mut parts = vec![src];
+    for o in occluders {
+        let mut next = Vec::with_capacity(parts.len() + 3);
+        for p in parts {
+            if o.r <= p.l || o.l >= p.r || o.b <= p.t || o.t >= p.b {
+                next.push(p);
+                continue;
+            }
+            if o.t > p.t {
+                next.push(Area { b: o.t, ..p });
+            }
+            if o.b < p.b {
+                next.push(Area { t: o.b, ..p });
+            }
+            let (t, b) = (p.t.max(o.t), p.b.min(o.b));
+            if o.l > p.l {
+                next.push(Area { l: p.l, t, r: o.l, b });
+            }
+            if o.r < p.r {
+                next.push(Area { l: o.r, t, r: p.r, b });
+            }
+        }
+        parts = next;
+        if parts.is_empty() {
+            break;
+        }
+    }
+    parts
+}
+
 /// Sprites collected for one `DrawSpriteBatch` call.
 #[derive(Default)]
 struct Sprites {
@@ -152,6 +242,13 @@ pub struct Renderer {
     origin: V2,
     flake: ID2D1Bitmap1,
     ball: ID2D1Bitmap1,
+    plow_img: Img,
+    box_img: Img,
+    hats: Vec<Img>,
+    scarves: Vec<Img>,
+    arm_img: Img,
+    nose_img: Img,
+    faces: Vec<Img>,
     glow: Vec<ID2D1Bitmap1>,
     pile: ID2D1SolidColorBrush,
     edge: ID2D1SolidColorBrush,
@@ -358,6 +455,27 @@ impl Renderer {
             };
             let flake = mk(32, flake_pixels(32))?;
             let ball = mk(256, ball_pixels(256))?;
+            let plow_img = load_png(&dc, include_bytes!("../assets/sprites/plow.png"))?;
+            let box_img = load_png(&dc, include_bytes!("../assets/sprites/box.png"))?;
+            // snowman accessories: every snowman gets a random combination
+            let hats = vec![
+                load_png(&dc, include_bytes!("../assets/sprites/hat.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/hat_santa.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/hat_beanie.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/hat_bucket.png"))?,
+            ];
+            let scarves = vec![
+                load_png(&dc, include_bytes!("../assets/sprites/scarf.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/scarf_blue.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/scarf_green.png"))?,
+            ];
+            let arm_img = load_png(&dc, include_bytes!("../assets/sprites/arm.png"))?;
+            let nose_img = load_png(&dc, include_bytes!("../assets/sprites/nose.png"))?;
+            let faces = vec![
+                load_png(&dc, include_bytes!("../assets/sprites/face.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/face_wink.png"))?,
+                load_png(&dc, include_bytes!("../assets/sprites/face_grin.png"))?,
+            ];
             let glow = PALETTE.iter().map(|c| mk(32, glow_pixels(32, *c))).collect::<Result<Vec<_>>>()?;
             let pile = dc.CreateSolidColorBrush(&color(0.975, 0.985, 1.0, 1.0), None)?;
             let edge = dc.CreateSolidColorBrush(&color(0.55, 0.64, 0.78, 0.75), None)?;
@@ -415,6 +533,13 @@ impl Renderer {
                 origin,
                 flake,
                 ball,
+                plow_img,
+                box_img,
+                hats,
+                scarves,
+                arm_img,
+                nose_img,
+                faces,
                 glow,
                 pile,
                 edge,
@@ -571,6 +696,30 @@ impl Renderer {
         }
     }
 
+    /// Window rectangles in render coordinates.
+    fn areas(&self, rects: &[crate::geom::RectI]) -> Vec<Area> {
+        let o = self.origin;
+        rects
+            .iter()
+            .map(|r| Area { l: r.l as f32 - o.x, t: r.t as f32 - o.y, r: r.r as f32 - o.x, b: r.b as f32 - o.y })
+            .collect()
+    }
+
+    /// Runs `draw` so that it only paints inside `area` and never over the windows in `front`.
+    fn occluded(&self, area: Area, front: &[Area], mut draw: impl FnMut() -> Result<()>) -> Result<()> {
+        let parts = subtract(area, front);
+        if parts.len() == 1 && parts[0] == area && front.is_empty() {
+            return draw();
+        }
+        for p in parts {
+            unsafe { self.dc.PushAxisAlignedClip(&p.rect(), D2D1_ANTIALIAS_MODE_ALIASED) };
+            let r = draw();
+            unsafe { self.dc.PopAxisAlignedClip() };
+            r?;
+        }
+        Ok(())
+    }
+
     /// Draws many copies of one bitmap in a single call (positions in screen coordinates).
     fn flush(&self, sp: &mut Sprites, bmp: &ID2D1Bitmap1) {
         let n = sp.rects.len();
@@ -629,6 +778,22 @@ impl Renderer {
         sp.colors.clear();
     }
 
+    /// Draws `img` into a screen rectangle; `flip` mirrors it horizontally.
+    fn image(&self, img: &Img, l: f32, t: f32, w: f32, h: f32, flip: bool) {
+        let o = self.origin;
+        let rect = D2D_RECT_F { left: l - o.x, top: t - o.y, right: l + w - o.x, bottom: t + h - o.y };
+        unsafe {
+            if flip {
+                let cx = l - o.x + w / 2.0;
+                self.dc.SetTransform(&Matrix3x2 { M11: -1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 2.0 * cx, M32: 0.0 });
+            }
+            self.dc.DrawBitmap(&img.bmp, Some(&rect), 1.0, D2D1_INTERPOLATION_MODE_LINEAR, None, None);
+            if flip {
+                self.dc.SetTransform(&Matrix3x2::identity());
+            }
+        }
+    }
+
     fn fill_rect(&self, l: f32, t: f32, r: f32, b: f32, radius: f32, c: D2D1_COLOR_F) {
         let o = self.origin;
         let (l, r) = if l < r { (l, r) } else { (r, l) };
@@ -657,21 +822,6 @@ impl Renderer {
             self.solid.SetColor(&col);
             self.dc.DrawLine(pt(a - self.origin), pt(b - self.origin), &self.solid, width, None);
         }
-    }
-
-    fn fill_poly(&self, pts: &[V2], col: D2D1_COLOR_F) -> Result<()> {
-        unsafe {
-            let g = self.factory.CreatePathGeometry()?;
-            let sink = g.Open()?;
-            sink.BeginFigure(pt(pts[0] - self.origin), D2D1_FIGURE_BEGIN_FILLED);
-            let rest: Vec<Vector2> = pts[1..].iter().map(|p| pt(*p - self.origin)).collect();
-            sink.AddLines(&rest);
-            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink.Close()?;
-            self.solid.SetColor(&col);
-            self.dc.FillGeometry(&g, &self.solid, None);
-        }
-        Ok(())
     }
 
     fn text(&self, s: &str, center: V2, fmt: &IDWriteTextFormat, col: D2D1_COLOR_F, shadow: f32) {
@@ -784,21 +934,24 @@ impl Renderer {
     fn draw_scene(&self, w: &World) -> Result<()> {
         let s = w.scale;
         // splats stuck on windows
-        for m in w.marks.iter().filter(|m| m.visible) {
+        for m in &w.marks {
             let a = (m.life / 3.0).min(1.0) * 0.95;
             let off = w.window_vel(m.hwnd) * w.lead;
             let o = self.origin - off;
-            let clip = D2D_RECT_F {
-                left: m.clip.l as f32 - o.x,
-                top: m.clip.t as f32 - o.y,
-                right: m.clip.r as f32 - o.x,
-                bottom: m.clip.b as f32 - o.y,
+            // on its own window only, and never over windows in front of it
+            let area = Area {
+                l: m.clip.l as f32 - o.x,
+                t: m.clip.t as f32 - o.y,
+                r: m.clip.r as f32 - o.x,
+                b: m.clip.b as f32 - o.y,
             };
-            unsafe { self.dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED) };
-            for &(bo, sz) in &m.blobs {
-                self.sprite(&self.ball, m.pos + off + bo * m.r, sz * m.r, a);
-            }
-            unsafe { self.dc.PopAxisAlignedClip() };
+            let front = self.areas(&w.front_of(m.hwnd));
+            self.occluded(area, &front, || {
+                for &(bo, sz) in &m.blobs {
+                    self.sprite(&self.ball, m.pos + off + bo * m.r, sz * m.r, a);
+                }
+                Ok(())
+            })?;
         }
 
         let td = Instant::now();
@@ -806,8 +959,27 @@ impl Renderer {
         let t = self.timing.get();
         self.timing.set([t[0], t[1], td.elapsed().as_secs_f32() * 1000.0]);
 
-        for st in w.stacks.iter().filter(|st| st.visible) {
-            self.draw_stack(st, st.vel * w.lead)?;
+        // stacks whose base is covered are still drawn: windows in front clip them
+        for st in &w.stacks {
+            let off = st.vel * w.lead;
+            let front = st.window().map(|h| self.areas(&w.front_of(h))).unwrap_or_default();
+            // bounds of the whole snowman: arms reach two radii out, the hat two radii up
+            let (mut l, mut t, mut r, mut b) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+            for (ball, c) in st.balls.iter().zip(&st.centers) {
+                let c = *c + off - self.origin;
+                l = l.min(c.x - ball.r * 2.2);
+                r = r.max(c.x + ball.r * 2.2);
+                t = t.min(c.y - ball.r * 2.0);
+                b = b.max(c.y + ball.r * 1.9);
+            }
+            if l < r {
+                self.occluded(Area { l, t, r, b }, &front, || self.draw_stack(st, off))?;
+            }
+        }
+
+        // a carried snowman is in the hand, in front of every window
+        if let Some(c) = &w.carried {
+            self.draw_stack(&c.stack, c.stack.vel * w.lead)?;
         }
 
         if let Some(b) = &w.firebox {
@@ -928,7 +1100,10 @@ impl Renderer {
 
     /// Fills and outlines the drift over columns a..b, in texture coordinates (base at y = `base`).
     fn draw_drift_span(&self, surf: &Surface, a0: usize, b0: usize, base: f32, scale: f32) -> Result<()> {
-        let snowy = |i: usize| surf.visible[i] && surf.heights[i] >= 0.3;
+        // the whole drift is drawn, even where a window in front covers its base line:
+        // windows in front clip it when it is drawn, so it is hidden exactly up to their edge
+        let hidden = surf.hidden;
+        let snowy = |i: usize| !hidden && surf.heights[i] >= 0.3;
         let mut pts: Vec<Vector2> = Vec::with_capacity(SEG / 2 + 8);
         unsafe {
             let fill = self.factory.CreatePathGeometry()?;
@@ -959,11 +1134,10 @@ impl Renderer {
                 fs.AddLines(&pts);
                 fs.AddLine(Vector2 { X: b as f32, Y: base });
                 fs.EndFigure(D2D1_FIGURE_END_CLOSED);
-                // vertical edges only where the drift really ends: not where another window hides
-                // the rest of it, and not where it joins a neighbouring drift
+                // vertical edges only where the drift really ends, not where it joins a neighbouring drift
                 let n = surf.heights.len();
-                let edge_l = if a == 0 { !surf.join_l } else { surf.visible[a - 1] };
-                let edge_r = if b == n { !surf.join_r } else { surf.visible[b] };
+                let edge_l = a > 0 || !surf.join_l;
+                let edge_r = b < n || !surf.join_r;
                 let first = if edge_l { Vector2 { X: a as f32, Y: base } } else { pts[0] };
                 ls.BeginFigure(first, D2D1_FIGURE_BEGIN_HOLLOW);
                 ls.AddLines(if edge_l { &pts[..] } else { &pts[1..] });
@@ -993,129 +1167,87 @@ impl Renderer {
             let x = (surf.left as f32 + off.x).round();
             let y = (surf.top as f32 - t.height as f32 + off.y).round();
             let dest = D2D_RECT_F { left: x, top: y, right: x + t.width as f32, bottom: y + t.height as f32 };
-            unsafe {
-                self.dc.DrawBitmap(&t.bmp, Some(&dest), 1.0, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None, None);
-            }
+            // the drift rises above its window's edge: windows in front hide it, not only its base
+            let front = if surf.key < (1u64 << 62) { self.areas(&w.front_of(surf.key as isize)) } else { Vec::new() };
+            let area = Area { l: dest.left, t: dest.top, r: dest.right, b: dest.bottom };
+            self.occluded(area, &front, || {
+                unsafe {
+                    self.dc.DrawBitmap(&t.bmp, Some(&dest), 1.0, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None, None);
+                }
+                Ok(())
+            })?;
         }
         Ok(())
     }
 
     fn draw_stack(&self, st: &Stack, off: V2) -> Result<()> {
+        let snowman = st.is_snowman() && st.centers.len() >= 3;
+        // twig arms go behind the body, so draw them first
+        if snowman {
+            let body = st.centers[1] + off;
+            let rb = st.balls[1].r;
+            let a = rb * 1.45;
+            let ah = a * self.arm_img.h / self.arm_img.w;
+            self.image(&self.arm_img, body.x + rb * 0.62, body.y + rb * 0.2 - ah, a, ah, false);
+            self.image(&self.arm_img, body.x - rb * 0.62 - a, body.y + rb * 0.2 - ah, a, ah, true);
+        }
         for (b, c) in st.balls.iter().zip(&st.centers) {
             self.sprite(&self.ball, *c + off, b.r, 1.0);
             self.speckles(*c + off, b.r, b.rot, 0.25);
         }
-        if !st.is_snowman() || st.centers.len() < 3 {
+        if !snowman {
             return Ok(());
         }
         let body = st.centers[1] + off;
         let rb = st.balls[1].r;
         let head = st.centers[2] + off;
         let rh = st.balls[2].r;
-        let coal = color(0.12, 0.12, 0.16, 1.0);
-        let wood = color(0.42, 0.27, 0.14, 1.0);
-        let scarf_cols = [(0.85, 0.12, 0.15), (0.15, 0.45, 0.85), (0.15, 0.6, 0.3), (0.6, 0.2, 0.75)];
-        let (sr, sg, sb) = scarf_cols[(st.seed % 4) as usize];
-        let scarf = color(sr, sg, sb, 1.0);
-        let scarf_dark = color(sr * 0.7, sg * 0.7, sb * 0.7, 1.0);
-
-        // stick arms with twig fingers
-        for side in [-1.0f32, 1.0] {
-            let a = body + V2(side * rb * 0.8, -rb * 0.15);
-            let e = body + V2(side * rb * 1.9, -rb * 0.85);
-            let wdt = (rb * 0.08).max(2.0);
-            self.line(a, e, wdt, wood);
-            let d = (e - a).norm();
-            for turn in [-0.6f32, 0.5] {
-                let (c, sn) = (turn.cos(), turn.sin());
-                let fd = V2(d.x * c - d.y * sn, d.x * sn + d.y * c);
-                let root = e - d * (rb * 0.2);
-                self.line(root, root + fd * (rb * 0.35), wdt * 0.7, wood);
-            }
-        }
         // coal buttons
-        for k in [-0.45f32, 0.0, 0.45] {
-            self.fill_circle(body + V2(0.0, rb * k), (rb * 0.08).max(1.5), coal);
+        let coal = color(0.12, 0.12, 0.15, 1.0);
+        for k in [-0.42f32, 0.02, 0.46] {
+            let c = body + V2(0.0, rb * k);
+            self.fill_circle(c, (rb * 0.085).max(1.5), coal);
+            self.fill_circle(c + V2(-rb * 0.025, -rb * 0.025), (rb * 0.03).max(0.6), color(0.45, 0.45, 0.5, 1.0));
         }
-        // scarf with a hanging end
-        self.fill_rect(head.x - rh * 0.95, head.y + rh * 0.62, head.x + rh * 0.95, head.y + rh * 1.0, rh * 0.15, scarf);
-        self.fill_rect(
-            head.x + rh * 0.3,
-            head.y + rh * 0.8,
-            head.x + rh * 0.68,
-            head.y + rh * 1.75,
-            rh * 0.1,
-            scarf_dark,
-        );
-        // eyes, carrot nose, smile
-        for side in [-1.0f32, 1.0] {
-            let e = head + V2(side * rh * 0.33, -rh * 0.18);
-            self.fill_circle(e, (rh * 0.1).max(1.5), coal);
-            self.fill_circle(e + V2(-rh * 0.03, -rh * 0.03), (rh * 0.03).max(0.6), color(1.0, 1.0, 1.0, 0.9));
-        }
-        self.fill_poly(
-            &[head + V2(-rh * 0.02, -rh * 0.06), head + V2(rh * 0.8, rh * 0.1), head + V2(-rh * 0.02, rh * 0.16)],
-            color(1.0, 0.52, 0.1, 1.0),
-        )?;
-        for i in 0..5 {
-            let a = 0.25 * std::f32::consts::PI + i as f32 / 4.0 * 0.5 * std::f32::consts::PI;
-            self.fill_circle(
-                head + V2(a.cos() * rh * 0.48, a.sin() * rh * 0.38 + rh * 0.12),
-                (rh * 0.055).max(1.0),
-                coal,
-            );
-        }
-        // top hat
-        let hat = color(0.1, 0.1, 0.13, 1.0);
-        self.fill_rect(head.x - rh * 0.95, head.y - rh * 0.86, head.x + rh * 0.95, head.y - rh * 0.68, rh * 0.06, hat);
-        self.fill_rect(head.x - rh * 0.6, head.y - rh * 1.8, head.x + rh * 0.6, head.y - rh * 0.75, rh * 0.06, hat);
-        self.fill_rect(head.x - rh * 0.6, head.y - rh * 1.0, head.x + rh * 0.6, head.y - rh * 0.82, 0.0, scarf);
+        // knitted scarf around the neck, end hanging on the right
+        let sw = rh * 2.3;
+        let look = st.look;
+        let scarf = &self.scarves[(look / 4) as usize % self.scarves.len()];
+        let sh = sw * scarf.h / scarf.w;
+        self.image(scarf, head.x - sw * 0.5, head.y + rh * 0.62, sw, sh, false);
+        // coal face and carrot nose
+        let fw = rh * 1.1;
+        let face = &self.faces[(look / 12) as usize % self.faces.len()];
+        let fh = fw * face.h / face.w;
+        self.image(face, head.x - fw * 0.5, head.y - rh * 0.45, fw, fh, false);
+        let nw = rh * 0.8;
+        let nh = nw * self.nose_img.h / self.nose_img.w;
+        self.image(&self.nose_img, head.x - rh * 0.05, head.y - nh * 0.35, nw, nh, false);
+        // the hat sits on top of the head
+        // (sprite, width in head radii, how far down onto the head it sits)
+        let fits = [(2.05, 0.55), (2.0, 0.35), (1.9, 0.38), (1.95, 0.5)];
+        let k = look as usize % self.hats.len();
+        let (wk, sink) = fits[k];
+        let hat = &self.hats[k];
+        let hw = rh * wk;
+        let hh = hw * hat.h / hat.w;
+        self.image(hat, head.x - hw * 0.5, head.y - rh * sink - hh, hw, hh, false);
         Ok(())
     }
 
     fn draw_firebox(&self, w: &World, b: &FireBox) -> Result<()> {
         let s = w.scale;
         let (x, y, bw, bh) = (b.pos.x, b.pos.y, b.w, b.h);
-        // tubes sticking out of the top
-        for k in 0..4usize {
-            let tx = x - bw * 0.33 + k as f32 * bw * 0.22;
-            let th = bh * (0.28 + 0.1 * ((k * 7) % 3) as f32);
-            let c = PALETTE[k * 2 % PALETTE.len()];
-            self.fill_rect(
-                tx - bw * 0.08,
-                y - bh - th,
-                tx + bw * 0.08,
-                y - bh + 2.0,
-                2.0 * s,
-                color(c.0 * 0.8, c.1 * 0.8, c.2 * 0.8, 1.0),
-            );
-            self.fill_rect(
-                tx - bw * 0.06,
-                y - bh - th,
-                tx + bw * 0.06,
-                y - bh - th + 3.0 * s,
-                1.0 * s,
-                color(0.15, 0.1, 0.1, 1.0),
-            );
-        }
-        // the box with a ribbon
-        self.fill_rect(x - bw / 2.0, y - bh, x + bw / 2.0, y, 4.0 * s, color(0.78, 0.12, 0.16, 1.0));
-        self.fill_rect(x - bw / 2.0, y - bh, x + bw / 2.0, y - bh + 6.0 * s, 3.0 * s, color(0.9, 0.2, 0.22, 1.0));
-        self.fill_rect(x - bw * 0.07, y - bh, x + bw * 0.07, y, 0.0, color(1.0, 0.82, 0.25, 1.0));
-        self.fill_rect(x - bw / 2.0, y - bh * 0.55, x + bw / 2.0, y - bh * 0.42, 0.0, color(1.0, 0.82, 0.25, 1.0));
-        for (i, star) in [(-0.3f32, 0.3f32), (0.3, 0.72), (-0.32, 0.75), (0.3, 0.3)].iter().enumerate() {
-            let p = V2(x + star.0 * bw, y - bh * star.1);
-            let tw = 0.6 + 0.4 * (w.time * 3.0 + i as f32).sin();
-            self.sprite(&self.glow[1], p, 4.0 * s, tw);
-        }
+        let iw = bw * 1.08;
+        let ih = iw * self.box_img.h / self.box_img.w;
+        self.image(&self.box_img, x - iw / 2.0, y - ih, iw, ih, false);
         // a lit fuse while a show is running
         if w.fireworks.active() {
-            let p = V2(x + bw * 0.42, y - bh - 4.0 * s);
-            self.line(V2(x + bw * 0.3, y - bh), p, 1.5 * s, color(0.3, 0.25, 0.2, 1.0));
+            let p = V2(x + bw * 0.28, y - bh - 2.0 * s);
             self.sprite(&self.glow[1], p, (6.0 + 3.0 * (w.time * 25.0).sin()) * s, 1.0);
         }
         if let Some(label) = &b.label {
-            self.text(label, V2(x, y - bh - 24.0 * s), &self.label_fmt, color(1.0, 0.95, 0.8, 0.95), 1.2 * s);
+            self.text(label, V2(x, y - ih - 14.0 * s), &self.label_fmt, color(1.0, 0.95, 0.8, 0.95), 1.2 * s);
         }
         Ok(())
     }
@@ -1125,63 +1257,22 @@ impl Renderer {
         let Some(f) = w.floors.get(p.floor) else { return Ok(()) };
         let base = f.top as f32;
         let d = p.dir;
-        let x = |lx: f32| p.x + d * lx * s;
-        let y = |ly: f32| base - ly * s;
-        let orange = color(1.0, 0.55, 0.08, 1.0);
-        let dark = color(0.18, 0.18, 0.2, 1.0);
-        // chassis and body
-        self.fill_rect(x(-72.0), y(26.0), x(62.0), y(14.0), 2.0 * s, dark);
-        self.fill_rect(x(-72.0), y(60.0), x(4.0), y(24.0), 4.0 * s, orange);
-        for k in 0..4 {
-            let lx = -64.0 + k as f32 * 18.0;
-            self.fill_rect(x(lx), y(54.0), x(lx + 10.0), y(30.0), 2.0 * s, color(0.9, 0.45, 0.05, 1.0));
-        }
-        // hazard stripes
-        for k in 0..6 {
-            let lx = -70.0 + k as f32 * 12.0;
-            self.fill_poly(
-                &[V2(x(lx), y(24.0)), V2(x(lx + 6.0), y(24.0)), V2(x(lx + 10.0), y(19.0)), V2(x(lx + 4.0), y(19.0))],
-                color(0.1, 0.1, 0.1, 1.0),
-            )?;
-        }
-        // cab
-        self.fill_rect(x(6.0), y(66.0), x(58.0), y(24.0), 6.0 * s, orange);
-        self.fill_rect(x(22.0), y(60.0), x(52.0), y(42.0), 3.0 * s, color(0.55, 0.8, 0.95, 1.0));
-        self.fill_rect(x(24.0), y(58.0), x(31.0), y(44.0), 1.0 * s, color(0.85, 0.95, 1.0, 0.8));
-        // blower chute
-        self.fill_poly(
-            &[V2(x(44.0), y(66.0)), V2(x(54.0), y(66.0)), V2(x(52.0), y(76.0)), V2(x(42.0), y(78.0))],
-            color(0.25, 0.25, 0.28, 1.0),
-        )?;
-        // headlight
-        self.sprite(&self.glow[7], V2(x(60.0), y(32.0)), 9.0 * s, 0.9);
-        // beacon
-        self.fill_rect(x(26.0), y(72.0), x(38.0), y(66.0), 2.0 * s, dark);
-        let blink = (p.t * 7.0).sin() > 0.0;
-        let lamp = if blink { color(1.0, 0.75, 0.1, 1.0) } else { color(0.6, 0.35, 0.05, 1.0) };
-        self.fill_rect(x(27.0), y(78.0), x(37.0), y(71.0), 3.0 * s, lamp);
-        if blink {
-            self.sprite(&self.glow[1], V2(x(32.0), y(75.0)), 22.0 * s, 0.9);
-        }
-        // the blade and the snow it pushes
+        // the sprite faces right; mirrored when driving left. A little bounce on the bumps.
+        let pw = 2.0 * (fx::PLOW_BLADE + 2.0) * s;
+        let ph = pw * self.plow_img.h / self.plow_img.w;
+        let bounce = (p.t * 13.0).sin().abs() * 1.2 * s;
+        let (l, t) = (p.x - pw / 2.0, base - ph - bounce + 2.0 * s);
+        // snow pushed ahead of the blade
         let load = (p.load.sqrt() * 0.7 * s).min(16.0 * s);
         if load > 1.0 {
-            self.sprite(&self.ball, V2(x(fx::PLOW_BLADE + 4.0) + d * load * 0.4, base - load * 0.6), load, 1.0);
+            self.sprite(&self.ball, V2(p.x + d * (pw / 2.0 + load * 0.4), base - load * 0.6), load, 1.0);
         }
-        self.line(V2(x(56.0), y(18.0)), V2(x(76.0), y(18.0)), 4.0 * s, dark);
-        self.fill_poly(
-            &[V2(x(74.0), y(34.0)), V2(x(84.0), y(30.0)), V2(x(fx::PLOW_BLADE + 2.0), y(2.0)), V2(x(76.0), y(1.0))],
-            color(0.95, 0.8, 0.1, 1.0),
-        )?;
-        // wheels
-        for lx in [-48.0f32, 36.0] {
-            let c = V2(x(lx), y(12.0));
-            self.fill_circle(c, 12.0 * s, color(0.08, 0.08, 0.09, 1.0));
-            self.fill_circle(c, 6.0 * s, color(0.6, 0.6, 0.62, 1.0));
-            for k in 0..3 {
-                let a = p.wheel * d + k as f32 * 2.094;
-                self.line(c, c + V2::from_angle(a) * 5.0 * s, 1.5 * s, color(0.3, 0.3, 0.32, 1.0));
-            }
+        self.image(&self.plow_img, l, t, pw, ph, d < 0.0);
+        // amber beacon on the cab roof
+        let blink = (p.t * 7.0).sin() > 0.0;
+        if blink {
+            let bx = p.x + d * (0.53 - 0.5) * pw;
+            self.sprite(&self.glow[1], V2(bx, t + ph * 0.06), 20.0 * s, 0.9);
         }
         Ok(())
     }

@@ -12,11 +12,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <canvas id="sky" aria-hidden="true"></canvas>
 
+  <a class="adbar" href="https://profile.tems.band/adX87Q01EE" target="_blank" rel="sponsored noopener">
+    <span class="ad-tag">Реклама</span>
+    <span><b>Tems VPN</b> от автора Snowie — обход белых списков, бесплатный пробный период</span>
+    <span class="go">Попробовать →</span>
+  </a>
   <header class="top">
     <a class="brand" href="#"><img src="assets/favicon.png" alt="" width="28" height="28"> Snowie</a>
     <nav>
@@ -36,10 +41,20 @@
         <a class="btn primary" data-release-link href="#">Скачать для Windows</a>
         <a class="btn ghost" href="#demo">Попробовать здесь ↓</a>
       </div>
+      <p class="price"><span class="cup" aria-hidden="true">☕</span> <s class="old" aria-label="было 399 рублей">399 ₽</s> По цене 0 кружек кофе</p>
       <p class="tiny">Один файл, 11 МБ. Без установки и прав администратора.</p>
+      <a class="promo-mini" href="https://profile.tems.band/adX87Q01EE" target="_blank" rel="sponsored noopener" aria-label="Реклама: Tems VPN">
+        <svg viewBox="0 0 48 56" width="26" height="30" aria-hidden="true"><path d="M24 2 4 10v15c0 13 8.6 23.6 20 29 11.4-5.4 20-16 20-29V10L24 2Z" fill="#a6f07a"/><path d="M15 28.5 21.5 35 34 21.5" fill="none" stroke="#0e2a17" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span><b>Tems VPN</b> — обход белых списков. Бесплатный пробный период</span>
+        <span class="go">→</span>
+        <span class="ad-tag">Реклама</span>
+      </a>
     </div>
     <div class="hero-art">
-      <img src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
+      <button class="tems" id="tems" type="button" aria-label="Темс: щёлкните, чтобы она бросила снежок">
+        <img src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
+        <span class="tems-hint">Кликни меня!</span>
+      </button>
     </div>
   </section>
 
@@ -54,15 +69,15 @@
       <span><b>Отпустите на ходу</b> — бросок</span>
       <span><b>Три шара</b> друг на друга — снеговик</span>
       <span><b>Потрясите</b> окно — снег слетит</span>
+      <span><b>Тащите</b> окно в сугроб — сгребёт снег</span>
     </div>
     <div id="desk" class="desk">
-      <div class="win" data-title="Музыка" style="left:8%;top:150px;width:330px;height:210px">
+      <div class="win" data-title="Музыка" style="left:6%;top:180px;width:330px;height:210px">
         <div class="bar"><span class="t">♫ Музыка</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
         <div class="body player">
           <div class="cover"></div>
           <div class="meta"><b>Jingle Bells</b><span>J. Pierpont, 1857</span><div class="prog"><div></div></div></div>
         </div>
-        <img class="sitter" src="assets/tems-sit.png" alt="Темс сидит на окне" width="150" height="150">
       </div>
       <div class="win" data-title="Блокнот" style="left:40%;top:230px;width:380px;height:220px">
         <div class="bar"><span class="t">Блокнот — список.txt</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
@@ -73,7 +88,7 @@
           <p>4. Не забыть салют в 00:00</p>
         </div>
       </div>
-      <div class="win" data-title="Проводник" style="left:63%;top:90px;width:300px;height:190px">
+      <div class="win" data-title="Проводник" style="left:66%;top:130px;width:300px;height:190px">
         <div class="bar"><span class="t">📁 Новый год</span><span class="ctl"><i>–</i><i>□</i><i class="x">✕</i></span></div>
         <div class="body files">
           <div><span class="ic">📁</span>Фото 2026</div>
@@ -88,6 +103,7 @@
         <span class="clock" id="clock">00:00</span>
       </div>
       <canvas id="snow"></canvas>
+      <img id="sitter" class="sitter" src="assets/tems-sit.png" alt="Темс сидит на окне" data-win="Музыка">
       <div class="desk-tools">
         <button data-act="fill">Насыпать снега</button>
         <button data-act="salute">Салют</button>
@@ -119,7 +135,7 @@
       </article>
       <article class="card">
         <h3>Живые сугробы</h3>
-        <p>Снег копится на верхних краях окон и на панели задач, осыпается по углу откоса и свешивается с краёв. Сугроб едет вместе с окном, а если окно потрясти — слетает.</p>
+        <p>Снег копится на верхних краях окон и на панели задач, осыпается по углу откоса и свешивается с краёв. Сугроб едет вместе с окном, а если окно потрясти — слетает. Двигаете окно — оно сгребает снег с соседних окон, как отвал.</p>
       </article>
       <article class="card">
         <h3>Снегоуборщик</h3>
@@ -157,6 +173,20 @@
     <p class="note-small">Рисует видеокарта через Direct2D и DirectComposition, частицы — одним вызовом на кадр, сугробы кешируются в текстурах. Подробности в <a data-repo-link data-path="/blob/main/docs/PERFORMANCE.md" href="#">docs/PERFORMANCE.md</a>.</p>
   </section>
 
+  <aside class="promo-wrap" aria-label="Реклама">
+    <a class="promo" href="https://profile.tems.band/adX87Q01EE" target="_blank" rel="sponsored noopener">
+      <span class="ad-label">Реклама</span>
+      <span class="shield" aria-hidden="true">
+        <svg viewBox="0 0 48 56" width="44" height="52"><path d="M24 2 4 10v15c0 13 8.6 23.6 20 29 11.4-5.4 20-16 20-29V10L24 2Z" fill="#a6f07a"/><path d="M15 28.5 21.5 35 34 21.5" fill="none" stroke="#0e2a17" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="promo-text">
+        <b>Tems VPN</b>
+        <span>VPN от автора Snowie. Обход белых списков, бесплатный пробный период.</span>
+      </span>
+      <span class="promo-btn">Попробовать →</span>
+    </a>
+  </aside>
+
   <section id="install" class="install">
     <div class="section-head"><h2>Установка</h2></div>
     <ol class="steps">
@@ -170,9 +200,10 @@
   <footer class="foot">
     <img class="foot-art" src="assets/tems-sit.png" alt="" width="120" height="120" loading="lazy">
     <p>Snowie — открытый проект под лицензией MIT.</p>
+    <p><a href="https://profile.tems.band/adX87Q01EE" target="_blank" rel="sponsored noopener">Tems VPN</a> <span class="ad-inline">реклама</span></p>
     <p class="credits">Персонаж Темс основан на модели Нэто: <b>neto model created by @evanciao</b>. Иллюстрации нарисованы по её рендерам. Мелодии — общественное достояние.</p>
   </footer>
 
-  <script src="snow.js?v=8"></script>
+  <script src="snow.js?v=30"></script>
 </body>
 </html>

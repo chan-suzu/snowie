@@ -12,6 +12,7 @@ categories = ["games", "multimedia"]
 [dependencies]
 eframe = "0.37.0"
 fastrand = "2"
+png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 windows-numerics = "0.3"
@@ -20,6 +21,7 @@ windows-numerics = "0.3"
 version = "0.62"
 features = [
     "Win32_Foundation",
+    "Win32_UI_Accessibility",
     "Win32_Graphics_Direct2D",
     "Win32_Graphics_Direct2D_Common",
     "Win32_Graphics_Direct3D",

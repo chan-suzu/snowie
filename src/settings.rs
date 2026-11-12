@@ -237,6 +237,42 @@ fn accent_button(ui: &mut Ui, text: &str) -> egui::Response {
     )
 }
 
+const VPN_URL: &str = "https://profile.tems.band/adX87Q01EE";
+
+/// Advertising banner for Tems VPN across the top of every page; the whole banner opens the link.
+fn vpn_banner(ui: &mut Ui) {
+    let lime = Color32::from_rgb(166, 240, 122);
+    let w = (ui.available_width() - 12.0).min(680.0);
+    let resp = egui::Frame::new()
+        .fill(Color32::from_rgb(18, 48, 31))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(47, 110, 67)))
+        .corner_radius(12)
+        .inner_margin(egui::Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_width(w - 28.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("🛡").size(20.0).color(lime));
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Tems VPN").family(FontFamily::Name("heading".into())).size(16.0).color(Color32::WHITE));
+                        ui.label(RichText::new("реклама").size(10.5).color(Color32::from_rgb(143, 181, 154)));
+                    });
+                    ui.label(RichText::new("Обход белых списков · бесплатный пробный период").size(13.0).color(Color32::from_rgb(196, 220, 203)));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new("Попробовать →").size(14.0).strong().color(lime));
+                });
+            });
+        })
+        .response
+        .interact(egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if resp.clicked() {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(VPN_URL));
+    }
+}
+
 fn heading(ui: &mut Ui, title: &str, sub: &str) {
     ui.label(RichText::new(title).family(FontFamily::Name("heading".into())).size(28.0).color(Color32::WHITE));
     ui.label(RichText::new(sub).size(14.0).color(WEAK));
@@ -627,6 +663,8 @@ impl eframe::App for SettingsApp {
                     // status line under the page
                     ui.label(RichText::new(&self.status).size(13.0).color(WEAK));
                     ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
+                        vpn_banner(ui);
+                        ui.add_space(14.0);
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             // keep a little room for the scrollbar
                             let w = (ui.available_width() - 12.0).min(680.0);

@@ -3033,6 +3033,7 @@ dependencies = [
  "eframe",
  "embed-resource",
  "fastrand",
+ "png",
  "serde",
  "serde_json",
  "windows",

@@ -363,6 +363,7 @@ fn run(rx: Receiver<Cmd>) {
     let mut music_pos = 0usize;
     let (mut music_vol, mut sfx_vol) = (0.35f32, 0.5f32);
     let (mut engine, mut engine_pan, mut engine_cur, mut engine_ph) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut pan_cur = 0.0f32;
     let mut engine_lp = Svf::new();
     let mut mix = vec![0.0f32; FRAMES * 2];
 
@@ -454,9 +455,14 @@ fn run(rx: Receiver<Cmd>) {
             });
             // snowplow engine: a low, rough rumble that fades in and out
             if engine > 0.0 || engine_cur > 0.001 {
-                let a = (engine_pan + 1.0) * std::f32::consts::FRAC_PI_4;
                 for f in 0..FRAMES {
                     engine_cur += (engine - engine_cur) * 0.0005;
+                    // glide the pan sample by sample, so the sound moves smoothly between the ears
+                    if engine_cur < 0.001 {
+                        pan_cur = engine_pan; // a fresh start begins where the truck is
+                    }
+                    pan_cur += (engine_pan - pan_cur) * 0.0004;
+                    let a = (pan_cur + 1.0) * std::f32::consts::FRAC_PI_4;
                     engine_ph += 42.0 / SR as f32;
                     let saw = (engine_ph.fract() * 2.0 - 1.0) + 0.5 * ((engine_ph * 2.0).fract() * 2.0 - 1.0);
                     let rough = engine_lp.low(rng.f32() * 2.0 - 1.0, 180.0) * 2.5;
