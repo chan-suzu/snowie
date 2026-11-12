@@ -1113,7 +1113,8 @@ impl World {
         let r0 = st.balls[0].r;
         let foot = c.foot;
         let landing = self.find_landing(foot.x, foot.y - r0 * 0.5, self.vrect.b as f32 + 1e4, false);
-        let place = landing.and_then(|id| self.surf_opt(id).map(|f| (id, f.left, f.col(foot.x).map(|k| f.surface_y(k)))));
+        let place =
+            landing.and_then(|id| self.surf_opt(id).map(|f| (id, f.left, f.col(foot.x).map(|k| f.surface_y(k)))));
         if let Some((id, left, Some(sy))) = place {
             st.surf = id;
             st.x = foot.x - left as f32;
@@ -1979,4 +1980,3 @@ fn dump(surf: &mut Surface, c: isize, mut m: f32, side: isize, spills: &mut Vec<
         spills.push((V2(x, surf.top as f32), m, side as f32));
     }
 }
-

@@ -154,7 +154,12 @@ fn load_png(dc: &ID2D1DeviceContext3, bytes: &[u8]) -> Result<Img> {
         px[i * 4 + 3] = a;
     }
     let bmp = unsafe {
-        dc.CreateBitmap(D2D_SIZE_U { width: w as u32, height: h as u32 }, Some(px.as_ptr() as *const _), (w * 4) as u32, &sprite_props())?
+        dc.CreateBitmap(
+            D2D_SIZE_U { width: w as u32, height: h as u32 },
+            Some(px.as_ptr() as *const _),
+            (w * 4) as u32,
+            &sprite_props(),
+        )?
     };
     Ok(Img { bmp, w: w as f32, h: h as f32 })
 }

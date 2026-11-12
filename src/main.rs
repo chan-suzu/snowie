@@ -48,7 +48,11 @@ unsafe extern "system" fn win_event(
     _thread: u32,
     _time: u32,
 ) {
-    if id_object == OBJID_WINDOW.0 && id_child == 0 && !hwnd.is_invalid() && unsafe { GetAncestor(hwnd, GA_ROOT) } == hwnd {
+    if id_object == OBJID_WINDOW.0
+        && id_child == 0
+        && !hwnd.is_invalid()
+        && unsafe { GetAncestor(hwnd, GA_ROOT) } == hwnd
+    {
         WINDOW_MOVED.store(true, Ordering::Relaxed);
     }
 }
@@ -253,7 +257,10 @@ impl SoundState {
         let level = if cfg.sounds { level } else { 0.0 };
         // follow the truck across the screen: the mixer glides between these updates
         let p = pan(at);
-        if (level - self.engine).abs() > 0.01 || (p - self.engine_pan).abs() > 0.005 || (level == 0.0 && self.engine != 0.0) {
+        if (level - self.engine).abs() > 0.01
+            || (p - self.engine_pan).abs() > 0.005
+            || (level == 0.0 && self.engine != 0.0)
+        {
             self.engine = level;
             self.engine_pan = p;
             self.audio.engine(level, p);

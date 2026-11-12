@@ -255,10 +255,19 @@ fn vpn_banner(ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Tems VPN").family(FontFamily::Name("heading".into())).size(16.0).color(Color32::WHITE));
+                        ui.label(
+                            RichText::new("Tems VPN")
+                                .family(FontFamily::Name("heading".into()))
+                                .size(16.0)
+                                .color(Color32::WHITE),
+                        );
                         ui.label(RichText::new("реклама").size(10.5).color(Color32::from_rgb(143, 181, 154)));
                     });
-                    ui.label(RichText::new("Обход белых списков · бесплатный пробный период").size(13.0).color(Color32::from_rgb(196, 220, 203)));
+                    ui.label(
+                        RichText::new("Обход белых списков · бесплатный пробный период")
+                            .size(13.0)
+                            .color(Color32::from_rgb(196, 220, 203)),
+                    );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(RichText::new("Попробовать →").size(14.0).strong().color(lime));
