@@ -107,11 +107,12 @@ fn make_overlay(mtm: MainThreadMarker, screen: &NSScreen, primary_h: f64) -> Ove
     panel.setIgnoresMouseEvents(true);
     panel.setLevel(LEVEL);
     panel.setHidesOnDeactivate(false);
+    // on every desktop, but not in the Spaces of full-screen apps and games
     panel.setCollectionBehavior(
         NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::Stationary
             | NSWindowCollectionBehavior::IgnoresCycle
-            | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            | NSWindowCollectionBehavior::FullScreenNone,
     );
     unsafe { panel.setReleasedWhenClosed(false) };
     let view = SnowView::new(mtm, NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
@@ -290,7 +291,17 @@ fn run(mtm: MainThreadMarker) {
             }
         }
 
-        let hidden = cfg.paused;
+        // a game or video in a borderless window that covers a whole screen (menu bar included)
+        // hides the snow, like a full-screen app in its own Space does
+        let scan::Scan { windows, popups } = scan::scan_windows(own_pid);
+        let fullscreen = cfg.hide_fullscreen
+            && windows.first().is_some_and(|w| {
+                mons.iter().any(|m| {
+                    let (r, s) = (w.rect, m.rect);
+                    r.l <= s.l && r.t <= s.t && r.r >= s.r && r.b >= s.b
+                })
+            });
+        let hidden = cfg.paused || fullscreen;
         sound.update(&cfg, hidden);
         if hidden {
             if !was_hidden {
@@ -343,7 +354,6 @@ fn run(mtm: MainThreadMarker) {
         }
 
         // ---- simulate and draw
-        let scan::Scan { windows, popups } = scan::scan_windows(own_pid);
         let mut clock = fx::local_clock();
         if let Some((start, n)) = fake_ny {
             let left = n - start.elapsed().as_secs() as i64;
