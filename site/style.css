@@ -182,7 +182,8 @@ code { background: #1a2748; padding: 2px 7px; border-radius: 6px; font-size: 0.9
 .win .files div:hover { background: #ffffff0d; }
 .win .ic { width: 20px; text-align: center; }
 /* Tems sits on the drift of a window: above the snow layer, placed by snow.js every frame */
-.sitter { position: absolute; left: 0; top: 0; width: 150px; height: auto; pointer-events: none; z-index: 55; will-change: transform; }
+/* the sitters are painted into the snow canvas; the pictures here only load them and give the size */
+.sitter { position: absolute; left: 0; top: 0; width: 150px; height: auto; pointer-events: none; visibility: hidden; }
 /* Suzu's picture is narrower: same height as Tems */
 .sitter.narrow { width: 130px; }
 

@@ -1293,7 +1293,7 @@ ${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2
       });
     }
     g.globalAlpha = 1;
-    for (const w of [...wins].sort((a, b) => a.z - b.z)) drawDrift(w.surf, w);
+    for (const w of [...wins].sort((a, b) => a.z - b.z)) { drawDrift(w.surf, w); drawSitters(w); }
     drawDrift(floor, null);
     for (const st of stacks) {
       if (!st.centers.length) continue; // a covered base is fine: windows in front clip it
@@ -1340,34 +1340,21 @@ ${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2
   const sitters = [...document.querySelectorAll('.sitter')]
     .map(el => ({ el, win: wins.find(w => w.el.dataset.title === el.dataset.win), seat: parseFloat(el.dataset.seat) || 0.54 }))
     .filter(s => s.win);
-  function placeSitter() {
-    // sitters overlap each other in the same order as their windows: the one on the front
-    // window is drawn in front (both stay above the snow and under the demo buttons)
-    [...sitters].sort((a, b) => a.win.z - b.win.z).forEach((s, i) => {
-      const z = String(55 + Math.min(i, 4));
-      if (s.el.style.zIndex !== z) s.el.style.zIndex = z;
-    });
+  // They are drawn into the snow canvas, between the drifts: a sitter comes right after her
+  // window's drift, so the drifts and windows in front of her cover her in the right order,
+  // exactly like the snow. The <img> elements only load the pictures and give their CSS size.
+  function drawSitters(w) {
     for (const s of sitters) {
-      const el = s.el, w = s.win;
-      if (!el.naturalWidth) continue;
+      const el = s.el;
+      if (s.win !== w || !el.complete || !el.naturalWidth) continue;
       const sw = el.offsetWidth, sh = sw * (el.naturalHeight / el.naturalWidth);
       // sit near one end of the window's top edge
       const side = (W < 600 && el.dataset.sideNarrow) || el.dataset.side;
       const cx = side === 'right' ? w.x + w.w - sw * 0.5 - 18 : w.x + sw * 0.5 + 18;
       // fixed to the window edge itself: only the window moves the sitter
-      const seat = w.y - 4;
-      const left = Math.round(cx - sw / 2), top = Math.round(seat - sh * s.seat);
-      el.style.transform = `translate(${left}px, ${top}px)`;
-      // windows in front of the seat window cover the sitter exactly like they cover the snow
-      const area = { x: left - 20, y: top - 20, w: sw + 40, h: sh + 40 };
-      const parts = subtract(area, frontOf(w));
-      const key = parts.map(p => `${p.x | 0},${p.y | 0},${p.w | 0},${p.h | 0}`).join(';');
-      if (key !== el._clipKey) {
-        el._clipKey = key;
-        if (parts.length === 1 && parts[0] === area) el.style.clipPath = '';
-        else if (!parts.length) el.style.clipPath = 'inset(50%)';
-        else el.style.clipPath = `path('${parts.map(p => `M${p.x - left} ${p.y - top}h${p.w}v${p.h}h${-p.w}Z`).join(' ')}')`;
-      }
+      const left = Math.round(cx - sw / 2), top = Math.round(w.y - 4 - sh * s.seat);
+      g.globalAlpha = 1;
+      occluded(w, { x: left - 2, y: top - 2, w: sw + 4, h: sh + 4 }, () => g.drawImage(el, left, top, sw, sh));
     }
   }
 
@@ -1431,7 +1418,6 @@ ${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2
       updateBox();
       updateFireworks(dt);
       draw();
-      placeSitter();
       if (clockEl) { const d = new Date(); clockEl.textContent = d.toTimeString().slice(0, 5); }
     }
   }
