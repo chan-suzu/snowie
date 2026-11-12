@@ -13,9 +13,11 @@
   (function repoLinks() {
     const m = location.hostname.match(/^([\w-]+)\.github\.io$/);
     const repo = location.pathname.split('/').filter(Boolean)[0] || 'snowie';
-    const base = m ? `https://github.com/${m[1]}/${repo}` : 'https://github.com/search?q=snowie+desktop+snow&type=repositories';
+    const base = m ? `https://github.com/${m[1]}/${repo}` : 'https://github.com/chan-suzu/snowie';
     document.querySelectorAll('[data-repo-link]').forEach(a => (a.href = base + (a.dataset.path || '')));
-    document.querySelectorAll('[data-release-link]').forEach(a => (a.href = m ? base + '/releases/latest' : base));
+    document.querySelectorAll('[data-release-link]').forEach(a => (a.href = base + '/releases/latest'));
+    // the exe of the latest release itself: the download starts right away, no GitHub page
+    document.querySelectorAll('[data-download]').forEach(a => (a.href = base + '/releases/latest/download/snowie.exe'));
   })();
 
   // ---------------------------------------------------------------- sprites
