@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <canvas id="sky" aria-hidden="true"></canvas>
@@ -23,7 +23,7 @@
     <span class="go">Попробовать →</span>
   </a>
   <header class="top">
-    <a class="brand" href="#"><img src="assets/favicon.png" alt="" width="28" height="28"> Snowie</a>
+    <a class="brand" href="#"><img draggable="false" src="assets/favicon.png" alt="" width="28" height="28"> Snowie</a>
     <nav>
       <a href="#demo">Демо</a>
       <a href="#features">Возможности</a>
@@ -53,10 +53,10 @@
     </div>
     <div class="hero-art">
       <button class="suzu" id="suzu" type="button" aria-label="Сузу со снежком: щёлкните, и она подпрыгнет">
-        <img src="assets/suzu-snowball.png" alt="Сузу поднимает снежок над головой" width="308" height="560">
+        <img draggable="false" src="assets/suzu-snowball.png" alt="Сузу поднимает снежок над головой" width="308" height="560">
       </button>
       <button class="tems" id="tems" type="button" aria-label="Темс: щёлкните, чтобы она бросила снежок">
-        <img src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
+        <img draggable="false" src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
         <span class="tems-hint">Кликни меня!</span>
       </button>
     </div>
@@ -107,8 +107,8 @@
         <span class="clock" id="clock">00:00</span>
       </div>
       <canvas id="snow"></canvas>
-      <img id="sitter" class="sitter" src="assets/tems-sit.png" alt="Темс сидит на окне" data-win="Музыка">
-      <img class="sitter narrow" src="assets/suzu-sit.png" alt="Сузу сидит на окне" data-win="Блокнот" data-side-narrow="right" data-seat="0.545">
+      <img draggable="false" id="sitter" class="sitter" src="assets/tems-sit.png" alt="Темс сидит на окне" data-win="Музыка">
+      <img draggable="false" class="sitter narrow" src="assets/suzu-sit.png" alt="Сузу сидит на окне" data-win="Блокнот" data-side-narrow="right" data-seat="0.545">
       <div class="desk-tools">
         <button data-act="fill">Насыпать снега</button>
         <button data-act="salute">Салют</button>
@@ -125,14 +125,14 @@
     </div>
     <div class="grid">
       <article class="card wide">
-        <img src="assets/tems-throw.png" alt="Темс бросает снежок" loading="lazy" width="260" height="260">
+        <img draggable="false" src="assets/tems-throw.png" alt="Темс бросает снежок" loading="lazy" width="260" height="260">
         <div>
           <h3>Снежки</h3>
           <p>Возьмите снег мышкой и покрутите курсором по кругу — комок скатается в шар. Над сугробом шар растёт без ограничений, но чем он больше, тем тяжелее его тянуть. Брошенный снежок разбивается об окно и оставляет след, который сползает и тает.</p>
         </div>
       </article>
       <article class="card wide rev">
-        <img src="assets/tems-snowman.png" alt="Темс лепит снеговика" loading="lazy" width="260" height="260">
+        <img draggable="false" src="assets/tems-snowman.png" alt="Темс лепит снеговика" loading="lazy" width="260" height="260">
         <div>
           <h3>Снеговики</h3>
           <p>Положите три шара друг на друга — получится снеговик в шляпе, с шарфом, носом-морковкой и руками-веточками. Шар остаётся, только если лёг ровно сверху; иначе соскользнёт. Сильным броском снеговика можно разбить.</p>
@@ -147,7 +147,7 @@
         <p>Раз в несколько минут по панели задач проезжает маленький снегоуборщик с мигалкой и расчищает дорогу. Снеговиков он объезжает.</p>
       </article>
       <article class="card wide">
-        <img src="assets/tems-sparkler.png" alt="Темс с бенгальским огнём" loading="lazy" width="260" height="260">
+        <img draggable="false" src="assets/tems-sparkler.png" alt="Темс с бенгальским огнём" loading="lazy" width="260" height="260">
         <div>
           <h3>Новогодний салют</h3>
           <p>Коробка с фейерверками на панели задач считает время до Нового года. В полночь — три минуты салюта и поздравление. Можно поставить свои таймеры, а щелчок по коробке запускает салют сразу.</p>
@@ -195,7 +195,7 @@
   <section id="install" class="install">
     <div class="section-head"><h2>Установка</h2></div>
     <div class="install-row">
-    <img class="install-art" src="assets/suzu-mug.png" alt="Сузу с кружкой какао" width="271" height="560" loading="lazy">
+    <img draggable="false" class="install-art" src="assets/suzu-mug.png" alt="Сузу с кружкой какао" width="271" height="560" loading="lazy">
     <ol class="steps">
       <li><b><a data-download href="https://github.com/chan-suzu/snowie/releases/latest/download/snowie.exe">Скачайте snowie.exe</a></b> — загрузка начнётся сразу. Все версии — на странице <a data-release-link href="https://github.com/chan-suzu/snowie/releases/latest">Releases</a>.</li>
       <li><b>Запустите.</b> Появится значок-снежинка в трее, и пойдёт снег.</li>
@@ -207,7 +207,7 @@
 
   <section id="social" class="social">
     <div class="social-box">
-      <img class="social-art" src="assets/suzu-wave.png" alt="Сузу машет рукой" width="307" height="560" loading="lazy">
+      <img draggable="false" class="social-art" src="assets/suzu-wave.png" alt="Сузу машет рукой" width="307" height="560" loading="lazy">
       <div class="social-body">
         <h2>Мы в соцсетях</h2>
         <p>Новости Snowie, ролики с Темс и Сузу и всё, что мы делаем дальше.</p>
@@ -222,8 +222,8 @@
 
   <footer class="foot">
     <div class="foot-arts">
-      <img class="foot-art" src="assets/tems-sit.png" alt="" width="120" height="120" loading="lazy">
-      <img class="foot-art tall" src="assets/suzu-snowball.png" alt="" width="308" height="560" loading="lazy">
+      <img draggable="false" class="foot-art" src="assets/tems-sit.png" alt="" width="120" height="120" loading="lazy">
+      <img draggable="false" class="foot-art tall" src="assets/suzu-snowball.png" alt="" width="308" height="560" loading="lazy">
     </div>
     <p class="foot-social"><a href="https://t.me/temservershub" target="_blank" rel="noopener">Telegram</a> · <a href="https://www.tiktok.com/@tems.chan" target="_blank" rel="noopener">TikTok Темс</a> · <a href="https://www.tiktok.com/@suzu.aichan" target="_blank" rel="noopener">TikTok Сузу</a></p>
     <p>Snowie — открытый проект под лицензией MIT.</p>
