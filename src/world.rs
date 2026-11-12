@@ -1869,10 +1869,10 @@ fn shed_range(
         let j = (i + 3).min(range.end);
         let mut m = 0.0;
         let mut hmax = 0.0f32;
-        for k in i..j {
-            let t = surf.heights[k] * frac;
-            surf.heights[k] -= t;
-            hmax = hmax.max(surf.heights[k]);
+        for h in &mut surf.heights[i..j] {
+            let t = *h * frac;
+            *h -= t;
+            hmax = hmax.max(*h);
             m += t;
         }
         if m > 0.0 {
@@ -1903,17 +1903,17 @@ fn plow(surf: &mut Surface, r: RectI, band: (f32, f32), dir: f32, spills: &mut V
     }
     let mid = (c0 + c1) as f32 / 2.0;
     let (mut left, mut right) = (0.0f32, 0.0f32);
-    for c in c0..c1 {
-        let h = surf.heights[c];
+    for (c, hc) in surf.heights[c0..c1].iter_mut().enumerate() {
+        let h = *hc;
         if h <= 0.05 || top - h >= band.1 {
             continue;
         }
-        if dir > 0.0 || (dir == 0.0 && c as f32 >= mid) {
+        if dir > 0.0 || (dir == 0.0 && (c0 + c) as f32 >= mid) {
             right += h;
         } else {
             left += h;
         }
-        surf.heights[c] = 0.0;
+        *hc = 0.0;
     }
     if left + right <= 0.0 {
         return;
