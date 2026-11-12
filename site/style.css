@@ -234,6 +234,37 @@ code { background: #1a2748; padding: 2px 7px; border-radius: 6px; font-size: 0.9
 .foot p { margin: 6px auto; max-width: 720px; }
 .foot .credits b { color: var(--text); font-weight: 600; }
 .foot-art { width: 110px; height: auto; opacity: 0.95; }
+.foot-art.tall { width: auto; height: 150px; }
+.foot-arts { display: flex; justify-content: center; align-items: flex-end; gap: 18px; }
+.foot-social a { color: var(--text); }
+
+/* install: Suzu with a mug next to the steps */
+.install-row { display: flex; align-items: center; justify-content: center; gap: 28px; max-width: 900px; margin: 0 auto; }
+.install-row .steps { margin: 0; flex: 1; }
+.install-art { height: 280px; width: auto; flex: none; filter: drop-shadow(0 16px 30px #0008); }
+
+/* socials */
+.social { padding: 60px 16px 10px; }
+.social-box { max-width: 900px; margin: 0 auto; display: flex; align-items: center; gap: 30px;
+  background: linear-gradient(135deg, #2a2208cc, #131f3acc 60%); border: 1px solid #5a4a18; border-radius: var(--radius); padding: 26px 30px; }
+.social-art { height: 300px; width: auto; flex: none; filter: drop-shadow(0 16px 30px #0008); }
+.social-body h2 { font-size: clamp(26px, 3.6vw, 36px); }
+.social-body p { color: #c3d1ee; margin: 10px 0 18px; }
+.social-links { display: flex; flex-wrap: wrap; gap: 12px; }
+.soc { display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 14px; text-decoration: none;
+  color: #fff; background: #0e1730; border: 1px solid var(--line); transition: transform .15s, border-color .15s; }
+.soc:hover { transform: translateY(-2px); border-color: #ffc83d; }
+.soc span { display: flex; flex-direction: column; line-height: 1.2; }
+.soc small { color: var(--weak); font-size: 12.5px; }
+.soc.tg svg { color: #4fb3ff; }
+.soc.tt svg { color: #ffc83d; }
+
+@media (max-width: 720px) {
+  .install-row, .social-box { flex-direction: column; text-align: center; }
+  .social-links { justify-content: center; }
+  .install-row .steps { text-align: left; }
+  .social-art, .install-art { height: 240px; }
+}
 
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; text-align: left; padding-top: 10px; }
