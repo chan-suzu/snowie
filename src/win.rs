@@ -143,6 +143,13 @@ pub fn main() {
         let _ = audio::export(std::path::Path::new(dir));
         return;
     }
+    if args.iter().any(|a| a == "--games") {
+        // debug: which windows count as games (write it to a file: the exe has no console)
+        let path =
+            args.iter().skip_while(|a| *a != "--games").nth(1).cloned().unwrap_or_else(|| "snowie-games.txt".into());
+        let _ = std::fs::write(path, scan::describe_games());
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--export-music") {
         // writes the synthesized playlist to a WAV file
         let path = args.get(i + 1).map(String::as_str).unwrap_or("snowie-music.wav");
@@ -313,6 +320,7 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
         let started = Instant::now();
         let mut frame_start = Instant::now();
         let mut sound = SoundState::new();
+        let mut games = scan::Games::new();
 
         'main: loop {
             let mut msg = MSG::default();
@@ -326,6 +334,7 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
 
             if RELOAD.swap(false, Ordering::Relaxed) {
                 cfg = current_config();
+                games = scan::Games::new();
                 world.lock().unwrap().set_config(cfg.clone());
             }
             if DISPLAY_CHANGED.swap(false, Ordering::Relaxed) {
@@ -405,6 +414,7 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
             let dt = (t_ready - last).as_secs_f32().min(0.05);
             last = t_ready;
             let scan::Scan { windows, popups } = scan::scan_windows(&own);
+            let (windows, shields) = games.split(windows, cfg.hide_over_games, &cfg.no_snow_apps);
             hook::poll_cursor();
             let inputs = hook::take_inputs();
             let mut clock = fx::local_clock();
@@ -430,6 +440,7 @@ fn run(bench: Option<BenchOpts>) -> Result<()> {
                 }
                 t_upd0 = Instant::now();
                 w.set_popups(popups);
+                w.shields = shields;
                 w.update(dt, windows, inputs, clock);
                 sound.frame(&mut w, &cfg);
                 // every present waits for one vblank only (lowest latency); at rest the idle wait

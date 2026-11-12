@@ -205,6 +205,7 @@ fn run(mtm: MainThreadMarker) {
     // the simulation works in points: on macOS one point is what one pixel is at 100% on Windows
     let mut world = World::new(mons.clone(), vr, 1.0, cfg.clone());
     let mut sound = SoundState::new();
+    let mut games = scan::Games::new();
     let own_pid = std::process::id() as i32;
     let fake_ny: Option<(Instant, i64)> =
         std::env::var("SNOWIE_NY_IN").ok().and_then(|v| v.parse().ok()).map(|n| (Instant::now(), n));
@@ -260,6 +261,7 @@ fn run(mtm: MainThreadMarker) {
                 match cmd {
                     config::CMD_RELOAD => {
                         cfg = Config::load();
+                        games.reset();
                         world.set_config(cfg.clone());
                         tray.sync(&cfg);
                     }
@@ -294,6 +296,7 @@ fn run(mtm: MainThreadMarker) {
         // a game or video in a borderless window that covers a whole screen (menu bar included)
         // hides the snow, like a full-screen app in its own Space does
         let scan::Scan { windows, popups } = scan::scan_windows(own_pid);
+        let (windows, shields) = games.split(windows, cfg.hide_over_games, &cfg.no_snow_apps);
         let fullscreen = cfg.hide_fullscreen
             && windows.first().is_some_and(|w| {
                 mons.iter().any(|m| {
@@ -361,6 +364,7 @@ fn run(mtm: MainThreadMarker) {
         }
         world.active = true;
         world.set_popups(popups);
+        world.shields = shields;
         world.update(dt, windows, inputs, clock);
         sound.frame(&mut world, &cfg);
         world.lead = 0.0;

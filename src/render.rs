@@ -884,7 +884,7 @@ impl Renderer {
 
     fn draw_world(&self, w: &World) -> Result<()> {
         // menus and flyouts may sit below our overlay: keep their area free of snow
-        let masked = !w.popups.is_empty();
+        let masked = !w.popups.is_empty() || !w.shields.is_empty();
         if masked {
             self.push_popup_mask(w)?;
         }
@@ -908,7 +908,7 @@ impl Renderer {
             let mut geoms: Vec<Option<ID2D1Geometry>> = Vec::with_capacity(w.popups.len() + 1);
             let full = rect(vr.l as f32, vr.t as f32, vr.r as f32, vr.b as f32);
             geoms.push(Some(self.factory.CreateRectangleGeometry(&full)?.cast()?));
-            for p in &w.popups {
+            for p in w.popups.iter().chain(&w.shields) {
                 // a little margin for rounded corners and the edge of the shadow
                 let g = self.factory.CreateRectangleGeometry(&rect(
                     p.l as f32 - 2.0,

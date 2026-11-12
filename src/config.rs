@@ -21,6 +21,10 @@ pub struct Config {
     pub floor_drift: f32,
     pub fps: u32,
     pub hide_fullscreen: bool,
+    /// no snow over games, in a window too (found automatically)
+    pub hide_over_games: bool,
+    /// programs that never get snow over their windows: exe or app names, e.g. "notepad.exe"
+    pub no_snow_apps: Vec<String>,
     pub music: bool,
     pub volume: f32,
     /// sounds when playing with snow, fireworks, the snowplow
@@ -52,6 +56,8 @@ impl Default for Config {
             floor_drift: 60.0,
             fps: 60,
             hide_fullscreen: true,
+            hide_over_games: true,
+            no_snow_apps: Vec::new(),
             music: true,
             volume: 0.35,
             sounds: true,

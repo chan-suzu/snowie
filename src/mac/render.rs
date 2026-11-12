@@ -344,6 +344,8 @@ pub struct Renderer {
     vbuf: wgpu::Buffer,
     blend: Blend,
     clip: Option<Area>,
+    /// windows of games: every draw is cut around them
+    shields: Vec<Area>,
     pub targets: Vec<Target>,
     /// largest pixels-per-point of all screens: text and lines are sized for it
     max_scale: f32,
@@ -574,6 +576,7 @@ impl Renderer {
             vbuf,
             blend: Blend::Over,
             clip: None,
+            shields: Vec::new(),
             targets: Vec::new(),
             max_scale,
         };
@@ -1109,7 +1112,9 @@ impl Renderer {
         self.cmds.clear();
         self.blend = Blend::Over;
         self.clip = None;
+        self.shields.clear();
         if let Some(w) = w {
+            self.shields = areas(&w.shields);
             self.scene(w);
         }
         // newly rasterized glyphs
@@ -1202,9 +1207,25 @@ impl Renderer {
                         blend = Some(c.blend);
                         pass.set_pipeline(if c.blend == Blend::Add { &self.pipe_add } else { &self.pipe_over });
                     }
-                    pass.set_scissor_rect(l, tp, r - l, b - tp);
                     pass.set_bind_group(1, &self.textures[c.tex].bind, &[]);
-                    pass.draw(c.start..c.end, 0..1);
+                    // the clip minus the game windows, back in global points and out again
+                    let k = 1.0 / t.scale;
+                    let area = Area {
+                        l: t.origin.x + l as f32 * k,
+                        t: t.origin.y + tp as f32 * k,
+                        r: t.origin.x + r as f32 * k,
+                        b: t.origin.y + b as f32 * k,
+                    };
+                    for p in subtract(area, &self.shields) {
+                        let pl = (((p.l - t.origin.x) * t.scale).round().max(0.0) as u32).min(pw);
+                        let pt = (((p.t - t.origin.y) * t.scale).round().max(0.0) as u32).min(ph);
+                        let pr = (((p.r - t.origin.x) * t.scale).round().max(0.0) as u32).min(pw);
+                        let pb = (((p.b - t.origin.y) * t.scale).round().max(0.0) as u32).min(ph);
+                        if pl < pr && pt < pb {
+                            pass.set_scissor_rect(pl, pt, pr - pl, pb - pt);
+                            pass.draw(c.start..c.end, 0..1);
+                        }
+                    }
                 }
             }
         }

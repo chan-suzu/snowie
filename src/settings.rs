@@ -86,6 +86,7 @@ struct SettingsApp {
     last_sync: Instant,
     autostart: bool,
     new_timer: String,
+    new_app: String,
     status: String,
     page: Page,
     logo: egui::TextureHandle,
@@ -327,6 +328,7 @@ impl SettingsApp {
             last_sync: Instant::now(),
             autostart: tray::autostart_enabled(),
             new_timer: String::new(),
+            new_app: String::new(),
             status: String::new(),
             page: Page::Snow,
             logo,
@@ -631,6 +633,57 @@ impl SettingsApp {
                     toggle(ui, &mut self.cfg.hide_fullscreen);
                 },
             );
+            divider(ui);
+            row(
+                ui,
+                "Без снега поверх игр",
+                "И в оконном режиме: игры находятся сами",
+                |ui| {
+                    toggle(ui, &mut self.cfg.hide_over_games);
+                },
+            );
+        });
+        card(ui, |ui| {
+            row(
+                ui,
+                "Программы без снега",
+                "Имя программы, например notepad.exe",
+                |ui| {
+                    let enter;
+                    {
+                        let add = ui.button("Добавить");
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.new_app).hint_text("game.exe").desired_width(120.0),
+                        );
+                        enter = add.clicked() || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    }
+                    let name = self.new_app.trim().to_lowercase();
+                    if enter && !name.is_empty() {
+                        if !self.cfg.no_snow_apps.contains(&name) {
+                            self.cfg.no_snow_apps.push(name);
+                            self.cfg.no_snow_apps.sort();
+                        }
+                        self.new_app.clear();
+                    }
+                },
+            );
+            if !self.cfg.no_snow_apps.is_empty() {
+                ui.add_space(4.0);
+                let mut remove = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (i, t) in self.cfg.no_snow_apps.iter().enumerate() {
+                        let chip = egui::Button::new(RichText::new(format!("{t}   ✕")).color(TEXT))
+                            .fill(CONTROL)
+                            .corner_radius(14);
+                        if ui.add(chip).on_hover_text("Удалить").clicked() {
+                            remove = Some(i);
+                        }
+                    }
+                });
+                if let Some(i) = remove {
+                    self.cfg.no_snow_apps.remove(i);
+                }
+            }
         });
         card(ui, |ui| {
             row(

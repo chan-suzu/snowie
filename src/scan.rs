@@ -11,6 +11,8 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 pub struct WinInfo {
     pub hwnd: isize,
     pub rect: RectI,
+    /// the process that owns the window
+    pub pid: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,7 +116,9 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lp: LPARAM) -> BOOL {
         if rect.w() < 60 || rect.h() < 24 {
             return BOOL(1);
         }
-        ctx.out.push(WinInfo { hwnd: hwnd.0 as isize, rect });
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        ctx.out.push(WinInfo { hwnd: hwnd.0 as isize, rect, pid });
     }
     BOOL(1)
 }
@@ -189,5 +193,228 @@ pub fn foreground_fullscreen(mons: &[Monitor]) -> bool {
         }
         let r = to_rect(r);
         mons.iter().any(|m| r.l <= m.rect.l && r.t <= m.rect.t && r.r >= m.rect.r && r.b >= m.rect.b)
+    }
+}
+
+// ---------------------------------------------------------------- games
+
+/// Libraries that only games load: store and launcher SDKs, the Steam overlay, game engines,
+/// video codecs and physics made for games, old XInput.
+const GAME_MODULES: &[&str] = &[
+    "steam_api.dll",
+    "steam_api64.dll",
+    "gameoverlayrenderer.dll",
+    "gameoverlayrenderer64.dll",
+    "unityplayer.dll",
+    "gameassembly.dll",
+    "eossdk-win32-shipping.dll",
+    "eossdk-win64-shipping.dll",
+    "galaxy.dll",
+    "galaxy64.dll",
+    "binkw32.dll",
+    "binkw64.dll",
+    "bink2w32.dll",
+    "bink2w64.dll",
+    "physx3_x64.dll",
+    "physx3common_x64.dll",
+    "nvngx_dlss.dll",
+    "xinput1_3.dll",
+    "xinput9_1_0.dll",
+];
+
+/// Folders where launchers install games.
+const GAME_DIRS: &[&str] = &[
+    "\\steamapps\\common\\",
+    "\\epic games\\",
+    "\\gog galaxy\\games\\",
+    "\\riot games\\",
+    "\\xboxgames\\",
+    "\\ea games\\",
+    "\\ubisoft game launcher\\games\\",
+    "\\battle.net\\",
+];
+
+/// The executable path (lower case) and loaded module names of a process.
+fn process_info(pid: u32) -> Option<(String, Vec<String>)> {
+    use windows::Win32::System::ProcessStatus::{EnumProcessModulesEx, GetModuleBaseNameW, LIST_MODULES_ALL};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+    };
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let path =
+            if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len)
+                .is_ok()
+            {
+                String::from_utf16_lossy(&buf[..len as usize]).to_lowercase()
+            } else {
+                String::new()
+            };
+        let mut mods = vec![HMODULE::default(); 1024];
+        let mut needed = 0u32;
+        let mut names = Vec::new();
+        let size = (mods.len() * std::mem::size_of::<HMODULE>()) as u32;
+        if EnumProcessModulesEx(h, mods.as_mut_ptr(), size, &mut needed, LIST_MODULES_ALL).is_ok() {
+            let n = (needed as usize / std::mem::size_of::<HMODULE>()).min(mods.len());
+            for m in &mods[..n] {
+                let mut name = [0u16; 260];
+                let l = GetModuleBaseNameW(h, Some(*m), &mut name) as usize;
+                if l > 0 {
+                    names.push(String::from_utf16_lossy(&name[..l]).to_lowercase());
+                }
+            }
+        }
+        let _ = CloseHandle(h);
+        Some((path, names))
+    }
+}
+
+/// Executables Windows itself knows as games (Game Bar and Game Mode keep this list).
+fn known_games() -> Vec<String> {
+    use windows::Win32::System::Registry::*;
+    let mut out = Vec::new();
+    unsafe {
+        let mut key = HKEY::default();
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            windows::core::w!("System\\GameConfigStore\\Children"),
+            Some(0),
+            KEY_READ,
+            &mut key,
+        )
+        .is_err()
+        {
+            return out;
+        }
+        for i in 0.. {
+            let mut name = [0u16; 256];
+            let mut len = name.len() as u32;
+            if RegEnumKeyExW(key, i, Some(windows::core::PWSTR(name.as_mut_ptr())), &mut len, None, None, None, None)
+                .is_err()
+            {
+                break;
+            }
+            let mut val = [0u16; 1024];
+            let mut bytes = (val.len() * 2) as u32;
+            let ok = RegGetValueW(
+                key,
+                windows::core::PCWSTR(name.as_ptr()),
+                windows::core::w!("MatchedExeFullPath"),
+                RRF_RT_REG_SZ,
+                None,
+                Some(val.as_mut_ptr() as *mut _),
+                Some(&mut bytes),
+            )
+            .is_ok();
+            if ok {
+                let n = (bytes as usize / 2).saturating_sub(1).min(val.len());
+                let p = String::from_utf16_lossy(&val[..n]).to_lowercase();
+                if !p.is_empty() {
+                    out.push(p);
+                }
+            }
+        }
+        let _ = RegCloseKey(key);
+    }
+    out
+}
+
+/// Debug (`snowie.exe --games`): every visible window with its program and whether it counts
+/// as a game, one per line.
+pub fn describe_games() -> String {
+    let known = known_games();
+    let mut out = String::new();
+    for w in scan_windows(&[]).windows {
+        let Some((path, mods)) = process_info(w.pid) else {
+            out += &format!(
+                "pid {:>6}  (no access)
+",
+                w.pid
+            );
+            continue;
+        };
+        let mut why = Vec::new();
+        if known.contains(&path) {
+            why.push("known to Windows as a game".to_string());
+        }
+        if let Some(d) = GAME_DIRS.iter().find(|d| path.contains(*d)) {
+            why.push(format!("installed in {d}"));
+        }
+        if path.ends_with("-shipping.exe") {
+            why.push("Unreal build".into());
+        }
+        why.extend(mods.iter().filter(|m| GAME_MODULES.contains(&m.as_str())).map(|m| format!("loads {m}")));
+        let verdict = if why.is_empty() { "-".to_string() } else { format!("GAME: {}", why.join(", ")) };
+        out += &format!(
+            "pid {:>6}  {:?}  {}  {}
+",
+            w.pid, w.rect, path, verdict
+        );
+    }
+    out
+}
+
+/// Tells which windows belong to games (or to programs on the user's no-snow list), caching
+/// the answer per process: a process that does not look like a game yet is looked at again
+/// after a while, since games load their libraries a little after the window appears.
+pub struct Games {
+    cache: std::collections::HashMap<u32, (bool, std::time::Instant)>,
+    known: Vec<String>,
+    known_at: std::time::Instant,
+}
+
+impl Games {
+    pub fn new() -> Games {
+        Games { cache: Default::default(), known: known_games(), known_at: std::time::Instant::now() }
+    }
+
+    /// Splits off the windows that must stay free of snow.
+    pub fn split(&mut self, windows: Vec<WinInfo>, auto: bool, apps: &[String]) -> (Vec<WinInfo>, Vec<RectI>) {
+        use std::time::{Duration, Instant};
+        if !auto && apps.is_empty() {
+            return (windows, Vec::new());
+        }
+        if self.known_at.elapsed() > Duration::from_secs(300) {
+            self.known = known_games();
+            self.known_at = Instant::now();
+            self.cache.clear();
+        }
+        let own = std::process::id();
+        let mut keep = Vec::with_capacity(windows.len());
+        let mut shields = Vec::new();
+        for w in windows {
+            if w.pid == own || w.pid == 0 {
+                keep.push(w);
+                continue;
+            }
+            let fresh = match self.cache.get(&w.pid) {
+                Some(&(game, at)) => game || at.elapsed() < Duration::from_secs(15),
+                None => false,
+            };
+            if !fresh {
+                let game = process_info(w.pid).is_some_and(|(path, mods)| {
+                    let file = path.rsplit('\\').next().unwrap_or("").to_string();
+                    let listed = apps
+                        .iter()
+                        .any(|a| !a.is_empty() && (file == *a || file.trim_end_matches(".exe") == a.as_str()));
+                    let auto_game = auto
+                        && (self.known.contains(&path)
+                            || GAME_DIRS.iter().any(|d| path.contains(d))
+                            || path.ends_with("-shipping.exe")
+                            || mods.iter().any(|m| GAME_MODULES.contains(&m.as_str())));
+                    listed || auto_game
+                });
+                self.cache.insert(w.pid, (game, Instant::now()));
+            }
+            if self.cache.get(&w.pid).is_some_and(|c| c.0) {
+                shields.push(w.rect);
+            } else {
+                keep.push(w);
+            }
+        }
+        self.cache.retain(|_, c| c.0 || c.1.elapsed() < Duration::from_secs(60));
+        (keep, shields)
     }
 }

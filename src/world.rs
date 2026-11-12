@@ -453,6 +453,8 @@ pub struct World {
     pub windows: Vec<WinInfo>,
     /// screen areas of menus and flyouts: snow is not drawn there
     pub popups: Vec<RectI>,
+    /// windows of games and of programs on the no-snow list: nothing is drawn over them
+    pub shields: Vec<RectI>,
     pub win_surf: HashMap<isize, Surface>,
     pub floors: Vec<Surface>,
     pub particles: Vec<Particle>,
@@ -495,6 +497,7 @@ impl World {
             vrect,
             windows: Vec::new(),
             popups: Vec::new(),
+            shields: Vec::new(),
             win_surf: HashMap::new(),
             floors: Vec::new(),
             particles: Vec::new(),
