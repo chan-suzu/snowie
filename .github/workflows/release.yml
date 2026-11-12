@@ -29,6 +29,8 @@ jobs:
             snowie-${{ github.ref_name }}-windows-x64.zip
             target/release/snowie.exe
           generate_release_notes: true
+          # a tag with a suffix (v0.3.0-beta.1) is a test build: "latest" stays on the last stable one
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   macos:
     runs-on: macos-latest
@@ -48,6 +50,7 @@ jobs:
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           lipo -create -output "$APP/Contents/MacOS/Snowie"             target/aarch64-apple-darwin/release/snowie target/x86_64-apple-darwin/release/snowie
           VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${VERSION%%-*}
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -73,3 +76,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/Snowie-macos.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}
