@@ -1282,30 +1282,35 @@
     g.globalAlpha = 1;
   }
 
-  // ---------------------------------------------------------------- Tems on a window
-  // The picture's "ledge" (where her hands and seat rest) is this far down the image.
-  const SEAT = 0.54;
-  const sitter = document.getElementById('sitter');
-  const sitWin = sitter && wins.find(w => w.el.dataset.title === sitter.dataset.win);
+  // ---------------------------------------------------------------- Tems and Suzu on windows
+  // Each sitter names its window (data-win), the end of its top edge (data-side, and
+  // data-side-narrow on a phone, where the windows stand one under another) and how far down
+  // the picture its "ledge" is, where the hands and seat rest (data-seat).
+  const sitters = [...document.querySelectorAll('.sitter')]
+    .map(el => ({ el, win: wins.find(w => w.el.dataset.title === el.dataset.win), seat: parseFloat(el.dataset.seat) || 0.54 }))
+    .filter(s => s.win);
   function placeSitter() {
-    if (!sitter || !sitWin || !sitter.naturalWidth) return;
-    const w = sitWin;
-    const sw = sitter.offsetWidth, sh = sw * (sitter.naturalHeight / sitter.naturalWidth);
-    // sit near the left end of the window's top edge
-    const cx = w.x + sw * 0.5 + 18;
-    // she sits on the window edge itself, fixed to it: only the window moves her
-    const seat = w.y - 4;
-    const left = Math.round(cx - sw / 2), top = Math.round(seat - sh * SEAT);
-    sitter.style.transform = `translate(${left}px, ${top}px)`;
-    // windows in front of hers cover her exactly like they cover the snow
-    const area = { x: left - 20, y: top - 20, w: sw + 40, h: sh + 40 };
-    const parts = subtract(area, frontOf(w));
-    const key = parts.map(p => `${p.x | 0},${p.y | 0},${p.w | 0},${p.h | 0}`).join(';');
-    if (key !== sitter._clipKey) {
-      sitter._clipKey = key;
-      if (parts.length === 1 && parts[0] === area) sitter.style.clipPath = '';
-      else if (!parts.length) sitter.style.clipPath = 'inset(50%)';
-      else sitter.style.clipPath = `path('${parts.map(p => `M${p.x - left} ${p.y - top}h${p.w}v${p.h}h${-p.w}Z`).join(' ')}')`;
+    for (const s of sitters) {
+      const el = s.el, w = s.win;
+      if (!el.naturalWidth) continue;
+      const sw = el.offsetWidth, sh = sw * (el.naturalHeight / el.naturalWidth);
+      // sit near one end of the window's top edge
+      const side = (W < 600 && el.dataset.sideNarrow) || el.dataset.side;
+      const cx = side === 'right' ? w.x + w.w - sw * 0.5 - 18 : w.x + sw * 0.5 + 18;
+      // fixed to the window edge itself: only the window moves the sitter
+      const seat = w.y - 4;
+      const left = Math.round(cx - sw / 2), top = Math.round(seat - sh * s.seat);
+      el.style.transform = `translate(${left}px, ${top}px)`;
+      // windows in front of the seat window cover the sitter exactly like they cover the snow
+      const area = { x: left - 20, y: top - 20, w: sw + 40, h: sh + 40 };
+      const parts = subtract(area, frontOf(w));
+      const key = parts.map(p => `${p.x | 0},${p.y | 0},${p.w | 0},${p.h | 0}`).join(';');
+      if (key !== el._clipKey) {
+        el._clipKey = key;
+        if (parts.length === 1 && parts[0] === area) el.style.clipPath = '';
+        else if (!parts.length) el.style.clipPath = 'inset(50%)';
+        else el.style.clipPath = `path('${parts.map(p => `M${p.x - left} ${p.y - top}h${p.w}v${p.h}h${-p.w}Z`).join(' ')}')`;
+      }
     }
   }
 

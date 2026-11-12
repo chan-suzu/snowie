@@ -179,6 +179,8 @@ code { background: #1a2748; padding: 2px 7px; border-radius: 6px; font-size: 0.9
 .win .ic { width: 20px; text-align: center; }
 /* Tems sits on the drift of a window: above the snow layer, placed by snow.js every frame */
 .sitter { position: absolute; left: 0; top: 0; width: 150px; height: auto; pointer-events: none; z-index: 55; will-change: transform; }
+/* Suzu's picture is narrower: same height as Tems */
+.sitter.narrow { width: 130px; }
 
 .taskbar {
   position: absolute; left: 0; right: 0; bottom: 0; height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 12px;
@@ -285,6 +287,7 @@ code { background: #1a2748; padding: 2px 7px; border-radius: 6px; font-size: 0.9
   .card.wide, .card.wide.rev { grid-column: auto; flex-direction: column; text-align: center; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .sitter { width: 110px; }
+  .sitter.narrow { width: 95px; }
   .desk-tools { gap: 6px; }
   .desk-tools button { font-size: 12px; padding: 5px 10px; }
 }
