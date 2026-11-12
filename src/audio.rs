@@ -1,14 +1,11 @@
-//! Audio: a small mixer on `waveOut` that plays the music and the snow sounds together, in
+//! Audio: a small mixer (on `waveOut` on Windows, an AudioQueue on macOS) that plays the music and the snow sounds together, in
 //! stereo, panned by where on screen things happen. Every sound is synthesized at start-up
 //! (filtered noise grains for snow, sine sweeps for whooshes and whistles), so there are no
 //! audio files. When nothing plays the thread blocks and costs nothing.
 
 use std::f32::consts::TAU;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::time::Duration;
-use windows::core::PSTR;
-use windows::Win32::Media::Audio::*;
 
 pub const SR: u32 = 24000;
 const FRAMES: usize = 480; // 20 ms per buffer
@@ -311,22 +308,172 @@ struct Voice {
     pan: f32,
 }
 
-fn run(rx: Receiver<Cmd>) {
-    let bank = bank();
-    let arc = |v: &Vec<f32>| Arc::new(v.clone());
-    let banks = (
-        bank.grab.iter().map(arc).collect::<Vec<_>>(),
-        bank.roll.iter().map(arc).collect::<Vec<_>>(),
-        arc(&bank.throw),
-        bank.splat.iter().map(arc).collect::<Vec<_>>(),
-        arc(&bank.plop),
-        arc(&bank.snowman),
-        arc(&bank.crumble),
-        arc(&bank.launch),
-        bank.boom.iter().map(arc).collect::<Vec<_>>(),
-    );
-    let mut rng = fastrand::Rng::new();
+type Clip = Arc<Vec<f32>>;
 
+/// Everything that is playing, mixed into stereo frames at `SR`. The output (waveOut on
+/// Windows, an AudioQueue on macOS) only pulls buffers from it.
+struct Mixer {
+    grab: Vec<Clip>,
+    roll: Vec<Clip>,
+    throw: Clip,
+    splat: Vec<Clip>,
+    plop: Clip,
+    snowman: Clip,
+    crumble: Clip,
+    launch: Clip,
+    boom: Vec<Clip>,
+    rng: fastrand::Rng,
+    voices: Vec<Voice>,
+    music: Option<Arc<Vec<i16>>>,
+    music_pos: usize,
+    music_vol: f32,
+    sfx_vol: f32,
+    engine: f32,
+    engine_pan: f32,
+    engine_cur: f32,
+    engine_ph: f32,
+    pan_cur: f32,
+    engine_lp: Svf,
+}
+
+impl Mixer {
+    fn new() -> Mixer {
+        let bank = bank();
+        let one = |v: &Vec<f32>| Arc::new(v.clone());
+        let many = |v: &Vec<Vec<f32>>| v.iter().map(one).collect::<Vec<_>>();
+        Mixer {
+            grab: many(&bank.grab),
+            roll: many(&bank.roll),
+            throw: one(&bank.throw),
+            splat: many(&bank.splat),
+            plop: one(&bank.plop),
+            snowman: one(&bank.snowman),
+            crumble: one(&bank.crumble),
+            launch: one(&bank.launch),
+            boom: many(&bank.boom),
+            rng: fastrand::Rng::new(),
+            voices: Vec::new(),
+            music: None,
+            music_pos: 0,
+            music_vol: 0.35,
+            sfx_vol: 0.5,
+            engine: 0.0,
+            engine_pan: 0.0,
+            engine_cur: 0.0,
+            engine_ph: 0.0,
+            pan_cur: 0.0,
+            engine_lp: Svf::new(),
+        }
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn busy(&self) -> bool {
+        !self.voices.is_empty() || self.music.is_some() || self.engine > 0.0 || self.engine_cur > 0.001
+    }
+
+    fn command(&mut self, cmd: Cmd) {
+        match cmd {
+            Cmd::Play(sfx, pan) => {
+                let rng = &mut self.rng;
+                let pick = |v: &Vec<Clip>, rng: &mut fastrand::Rng| v[rng.usize(..v.len())].clone();
+                let (buf, gain, rate) = match sfx {
+                    Sfx::Grab => (pick(&self.grab, rng), 1.0, 0.9 + rng.f32() * 0.25),
+                    Sfx::Roll(r) => (pick(&self.roll, rng), 0.8, (1.3 - r / 120.0).clamp(0.6, 1.3)),
+                    Sfx::Throw(v) => (self.throw.clone(), 0.3 + v.min(1.0) * 0.8, 0.85 + v.min(1.0) * 0.35),
+                    Sfx::Splat(k) => {
+                        (pick(&self.splat, rng), (0.35 + k * 0.45).min(1.3), (1.15 - k * 0.15).clamp(0.75, 1.2))
+                    }
+                    Sfx::Plop(r) => (self.plop.clone(), 0.9, (1.4 - r / 80.0).clamp(0.6, 1.4)),
+                    Sfx::Snowman => (self.snowman.clone(), 0.9, 1.0),
+                    Sfx::Crumble => (self.crumble.clone(), 0.9, 0.9 + rng.f32() * 0.2),
+                    Sfx::Launch => (self.launch.clone(), 0.7, 0.9 + rng.f32() * 0.25),
+                    Sfx::Boom(k) => (pick(&self.boom, rng), (0.4 + k * 0.5).min(1.2), 0.85 + rng.f32() * 0.3),
+                };
+                if self.voices.len() < 48 {
+                    self.voices.push(Voice { buf, pos: 0.0, rate, gain, pan });
+                }
+            }
+            Cmd::Music(m) => {
+                self.music = m;
+                self.music_pos = 0;
+            }
+            Cmd::Volumes { music: m, sfx: s } => {
+                self.music_vol = m;
+                self.sfx_vol = s;
+            }
+            Cmd::Engine(l, p) => {
+                self.engine = l;
+                self.engine_pan = p;
+            }
+        }
+    }
+
+    /// Mixes the next `out.len() / 2` stereo frames, soft-clipped to 16 bits.
+    fn render(&mut self, out: &mut [i16]) {
+        let frames = out.len() / 2;
+        let mut mix = vec![0.0f32; frames * 2];
+        // music, mono, looping
+        if let Some(m) = &self.music {
+            for f in 0..frames {
+                let x = m[self.music_pos] as f32 / 32768.0 * self.music_vol;
+                mix[f * 2] += x;
+                mix[f * 2 + 1] += x;
+                self.music_pos = (self.music_pos + 1) % m.len();
+            }
+        }
+        // effects, resampled for pitch variation and panned with equal power
+        let sfx_vol = self.sfx_vol;
+        self.voices.retain_mut(|v| {
+            let a = (v.pan + 1.0) * std::f32::consts::FRAC_PI_4;
+            let (gl, gr) = (a.cos() * v.gain * sfx_vol, a.sin() * v.gain * sfx_vol);
+            for f in 0..frames {
+                let p = v.pos as usize;
+                if p + 1 >= v.buf.len() {
+                    return false;
+                }
+                let fr = v.pos - p as f32;
+                let x = v.buf[p] * (1.0 - fr) + v.buf[p + 1] * fr;
+                mix[f * 2] += x * gl;
+                mix[f * 2 + 1] += x * gr;
+                v.pos += v.rate;
+            }
+            true
+        });
+        // snowplow engine: a low, rough rumble that fades in and out
+        if self.engine > 0.0 || self.engine_cur > 0.001 {
+            for f in 0..frames {
+                self.engine_cur += (self.engine - self.engine_cur) * 0.0005;
+                // glide the pan sample by sample, so the sound moves smoothly between the ears
+                if self.engine_cur < 0.001 {
+                    self.pan_cur = self.engine_pan; // a fresh start begins where the truck is
+                }
+                self.pan_cur += (self.engine_pan - self.pan_cur) * 0.0004;
+                let a = (self.pan_cur + 1.0) * std::f32::consts::FRAC_PI_4;
+                self.engine_ph += 42.0 / SR as f32;
+                let ph = self.engine_ph;
+                let saw = (ph.fract() * 2.0 - 1.0) + 0.5 * ((ph * 2.0).fract() * 2.0 - 1.0);
+                let rough = self.engine_lp.low(self.rng.f32() * 2.0 - 1.0, 180.0) * 2.5;
+                let trem = 0.8 + 0.2 * (TAU * 7.0 * ph / 42.0).sin();
+                let x = (saw * 0.25 + rough) * trem * self.engine_cur * 0.22 * sfx_vol;
+                mix[f * 2] += x * a.cos();
+                mix[f * 2 + 1] += x * a.sin();
+            }
+        }
+        for (o, x) in out.iter_mut().zip(&mix) {
+            // soft clip so many simultaneous sounds never crackle
+            *o = (x.tanh() * 32000.0) as i16;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn run(rx: Receiver<Cmd>) {
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::time::Duration;
+        use windows::core::PSTR;
+    use windows::Win32::Media::Audio::*;
+
+    let mut mixer = Mixer::new();
     let fmt = WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_PCM as u16,
         nChannels: 2,
@@ -358,20 +505,10 @@ fn run(rx: Receiver<Cmd>) {
         hd.dwFlags |= WHDR_DONE;
     }
 
-    let mut voices: Vec<Voice> = Vec::new();
-    let mut music: Option<Arc<Vec<i16>>> = None;
-    let mut music_pos = 0usize;
-    let (mut music_vol, mut sfx_vol) = (0.35f32, 0.5f32);
-    let (mut engine, mut engine_pan, mut engine_cur, mut engine_ph) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-    let mut pan_cur = 0.0f32;
-    let mut engine_lp = Svf::new();
-    let mut mix = vec![0.0f32; FRAMES * 2];
-
     loop {
-        let busy = !voices.is_empty() || music.is_some() || engine > 0.0 || engine_cur > 0.001;
         let pending = hdrs.iter().any(|hd| hd.dwFlags & WHDR_DONE == 0);
         // idle: wait for something to play without spinning
-        let first = if busy || pending {
+        let first = if mixer.busy() || pending {
             match rx.recv_timeout(Duration::from_millis(5)) {
                 Ok(c) => Some(c),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -384,99 +521,17 @@ fn run(rx: Receiver<Cmd>) {
             }
         };
         for cmd in first.into_iter().chain(rx.try_iter()) {
-            match cmd {
-                Cmd::Play(sfx, pan) => {
-                    let pick = |v: &Vec<Arc<Vec<f32>>>, rng: &mut fastrand::Rng| v[rng.usize(..v.len())].clone();
-                    let (buf, gain, rate) = match sfx {
-                        Sfx::Grab => (pick(&banks.0, &mut rng), 1.0, 0.9 + rng.f32() * 0.25),
-                        Sfx::Roll(r) => (pick(&banks.1, &mut rng), 0.8, (1.3 - r / 120.0).clamp(0.6, 1.3)),
-                        Sfx::Throw(v) => (banks.2.clone(), 0.3 + v.min(1.0) * 0.8, 0.85 + v.min(1.0) * 0.35),
-                        Sfx::Splat(k) => {
-                            (pick(&banks.3, &mut rng), (0.35 + k * 0.45).min(1.3), (1.15 - k * 0.15).clamp(0.75, 1.2))
-                        }
-                        Sfx::Plop(r) => (banks.4.clone(), 0.9, (1.4 - r / 80.0).clamp(0.6, 1.4)),
-                        Sfx::Snowman => (banks.5.clone(), 0.9, 1.0),
-                        Sfx::Crumble => (banks.6.clone(), 0.9, 0.9 + rng.f32() * 0.2),
-                        Sfx::Launch => (banks.7.clone(), 0.7, 0.9 + rng.f32() * 0.25),
-                        Sfx::Boom(k) => (pick(&banks.8, &mut rng), (0.4 + k * 0.5).min(1.2), 0.85 + rng.f32() * 0.3),
-                    };
-                    if voices.len() < 48 {
-                        voices.push(Voice { buf, pos: 0.0, rate, gain, pan });
-                    }
-                }
-                Cmd::Music(m) => {
-                    music = m;
-                    music_pos = 0;
-                }
-                Cmd::Volumes { music: m, sfx: s } => {
-                    music_vol = m;
-                    sfx_vol = s;
-                }
-                Cmd::Engine(l, p) => {
-                    engine = l;
-                    engine_pan = p;
-                }
-            }
+            mixer.command(cmd);
         }
-        for i in 0..BUFFERS {
-            if hdrs[i].dwFlags & WHDR_DONE == 0 {
+        for (hd, buf) in hdrs.iter_mut().zip(bufs.iter_mut()) {
+            if hd.dwFlags & WHDR_DONE == 0 {
                 continue;
             }
-            let busy = !voices.is_empty() || music.is_some() || engine > 0.0 || engine_cur > 0.001;
-            if !busy {
+            if !mixer.busy() {
                 break;
             }
-            mix.iter_mut().for_each(|x| *x = 0.0);
-            // music, mono, looping
-            if let Some(m) = &music {
-                for f in 0..FRAMES {
-                    let x = m[music_pos] as f32 / 32768.0 * music_vol;
-                    mix[f * 2] += x;
-                    mix[f * 2 + 1] += x;
-                    music_pos = (music_pos + 1) % m.len();
-                }
-            }
-            // effects, resampled for pitch variation and panned with equal power
-            voices.retain_mut(|v| {
-                let a = (v.pan + 1.0) * std::f32::consts::FRAC_PI_4;
-                let (gl, gr) = (a.cos() * v.gain * sfx_vol, a.sin() * v.gain * sfx_vol);
-                for f in 0..FRAMES {
-                    let p = v.pos as usize;
-                    if p + 1 >= v.buf.len() {
-                        return false;
-                    }
-                    let fr = v.pos - p as f32;
-                    let x = v.buf[p] * (1.0 - fr) + v.buf[p + 1] * fr;
-                    mix[f * 2] += x * gl;
-                    mix[f * 2 + 1] += x * gr;
-                    v.pos += v.rate;
-                }
-                true
-            });
-            // snowplow engine: a low, rough rumble that fades in and out
-            if engine > 0.0 || engine_cur > 0.001 {
-                for f in 0..FRAMES {
-                    engine_cur += (engine - engine_cur) * 0.0005;
-                    // glide the pan sample by sample, so the sound moves smoothly between the ears
-                    if engine_cur < 0.001 {
-                        pan_cur = engine_pan; // a fresh start begins where the truck is
-                    }
-                    pan_cur += (engine_pan - pan_cur) * 0.0004;
-                    let a = (pan_cur + 1.0) * std::f32::consts::FRAC_PI_4;
-                    engine_ph += 42.0 / SR as f32;
-                    let saw = (engine_ph.fract() * 2.0 - 1.0) + 0.5 * ((engine_ph * 2.0).fract() * 2.0 - 1.0);
-                    let rough = engine_lp.low(rng.f32() * 2.0 - 1.0, 180.0) * 2.5;
-                    let trem = 0.8 + 0.2 * (TAU * 7.0 * engine_ph / 42.0).sin();
-                    let x = (saw * 0.25 + rough) * trem * engine_cur * 0.22 * sfx_vol;
-                    mix[f * 2] += x * a.cos();
-                    mix[f * 2 + 1] += x * a.sin();
-                }
-            }
-            for (o, x) in bufs[i].iter_mut().zip(&mix) {
-                // soft clip so many simultaneous sounds never crackle
-                *o = (x.tanh() * 32000.0) as i16;
-            }
-            unsafe { waveOutWrite(h, &mut hdrs[i], hsize) };
+            mixer.render(buf);
+            unsafe { waveOutWrite(h, hd, hsize) };
         }
     }
     unsafe {
@@ -486,4 +541,70 @@ fn run(rx: Receiver<Cmd>) {
         }
         waveOutClose(h);
     }
+}
+
+/// macOS: an AudioQueue pulls 16-bit stereo buffers at `SR` and converts the rate itself. It
+/// keeps running (mixing silence, which costs next to nothing) while nothing plays.
+#[cfg(target_os = "macos")]
+fn run(rx: Receiver<Cmd>) {
+    use objc2_audio_toolbox::{
+        AudioQueueAllocateBuffer, AudioQueueBufferRef, AudioQueueEnqueueBuffer, AudioQueueNewOutput, AudioQueueRef,
+        AudioQueueStart,
+    };
+    use objc2_core_audio_types::{
+        kAudioFormatFlagIsPacked, kAudioFormatFlagIsSignedInteger, kAudioFormatLinearPCM, AudioStreamBasicDescription,
+    };
+    use std::ffi::c_void;
+    use std::ptr::NonNull;
+    use std::sync::Mutex;
+
+    struct State {
+        mixer: Mutex<Mixer>,
+        rx: Mutex<Receiver<Cmd>>,
+    }
+
+    unsafe extern "C-unwind" fn fill(user: *mut c_void, queue: AudioQueueRef, buf: AudioQueueBufferRef) {
+        let st = unsafe { &*(user as *const State) };
+        let b = unsafe { &mut *buf };
+        let n = b.mAudioDataBytesCapacity as usize / 2;
+        let out = unsafe { std::slice::from_raw_parts_mut(b.mAudioData as *mut i16, n) };
+        match (st.mixer.lock(), st.rx.lock()) {
+            (Ok(mut m), Ok(rx)) => {
+                for cmd in rx.try_iter() {
+                    m.command(cmd);
+                }
+                m.render(out);
+            }
+            _ => out.fill(0),
+        }
+        b.mAudioDataByteSize = (n * 2) as u32;
+        unsafe { AudioQueueEnqueueBuffer(queue, buf, 0, std::ptr::null()) };
+    }
+
+    let st: &'static State = Box::leak(Box::new(State { mixer: Mutex::new(Mixer::new()), rx: Mutex::new(rx) }));
+    let user = st as *const State as *mut c_void;
+    let fmt = AudioStreamBasicDescription {
+        mSampleRate: SR as f64,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 4,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: 4,
+        mChannelsPerFrame: 2,
+        mBitsPerChannel: 16,
+        mReserved: 0,
+    };
+    let mut queue: AudioQueueRef = std::ptr::null_mut();
+    let status = unsafe { AudioQueueNewOutput(NonNull::from(&fmt), Some(fill), user, None, None, 0, NonNull::from(&mut queue)) };
+    if status != 0 || queue.is_null() {
+        return;
+    }
+    for _ in 0..BUFFERS {
+        let mut buf: AudioQueueBufferRef = std::ptr::null_mut();
+        if unsafe { AudioQueueAllocateBuffer(queue, (FRAMES * 4) as u32, NonNull::from(&mut buf)) } == 0 {
+            unsafe { fill(user, queue, buf) };
+        }
+    }
+    unsafe { AudioQueueStart(queue, std::ptr::null()) };
+    // the queue's own thread does the work from here on
 }
