@@ -231,6 +231,16 @@
 
   // ---------------------------------------------------------------- Tems in the hero
   // Hops now and then; a click makes her throw a snowball that flies off in an arc and splats.
+  // Suzu next to Tems: hops when clicked
+  (function heroSuzu() {
+    const btn = document.getElementById('suzu');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      btn.classList.remove('hop'); void btn.offsetWidth; btn.classList.add('hop');
+      setTimeout(() => btn.classList.remove('hop'), 700);
+    });
+  })();
+
   (function heroTems() {
     const btn = document.getElementById('tems');
     if (!btn) return;
