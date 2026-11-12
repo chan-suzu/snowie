@@ -29,3 +29,47 @@ jobs:
             snowie-${{ github.ref_name }}-windows-x64.zip
             target/release/snowie.exe
           generate_release_notes: true
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (Apple Silicon and Intel)
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+      - name: Package Snowie.app
+        run: |
+          APP=dist/Snowie.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          lipo -create -output "$APP/Contents/MacOS/Snowie"             target/aarch64-apple-darwin/release/snowie target/x86_64-apple-darwin/release/snowie
+          VERSION=${GITHUB_REF_NAME#v}
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>Snowie</string>
+              <key>CFBundleDisplayName</key><string>Snowie</string>
+              <key>CFBundleIdentifier</key><string>band.tems.snowie</string>
+              <key>CFBundleExecutable</key><string>Snowie</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+              <key>CFBundleVersion</key><string>${VERSION}</string>
+              <key>CFBundleIconFile</key><string>AppIcon</string>
+              <key>LSMinimumSystemVersion</key><string>11.0</string>
+              <key>LSUIElement</key><true/>
+              <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          sips -s format icns -z 512 512 site/assets/favicon.png --out "$APP/Contents/Resources/AppIcon.icns" || true
+          codesign --force --deep -s - "$APP"
+          cd dist && ditto -c -k --keepParent Snowie.app Snowie-macos.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Snowie-macos.zip

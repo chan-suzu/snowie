@@ -6,7 +6,7 @@
 use crate::fx::{self, Plow, PALETTE};
 use crate::geom::{lerp, RectI, V2};
 use crate::world::{ball_radius, FireBox, Kind, Stack, World, SPECKLES};
-use raw_window_handle::{AppKitWindowHandle, RawWindowHandle};
+use raw_window_handle::{AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
@@ -394,7 +394,7 @@ impl Renderer {
             let handle = RawWindowHandle::AppKit(AppKitWindowHandle::new(*view));
             let surface = unsafe {
                 instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                    raw_display_handle: None,
+                    raw_display_handle: Some(RawDisplayHandle::AppKit(AppKitDisplayHandle::new())),
                     raw_window_handle: handle,
                 })
             }
