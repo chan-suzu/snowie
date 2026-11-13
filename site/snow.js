@@ -561,15 +561,22 @@ ${cfg.eyes.map(e => `        c = lid(c, s, vec2(${f(e[0])}, ${f(e[1])}), ${f(e[2
       if (h[n - 1] > lip) { const e = (h[n - 1] - lip) * 0.35; h[n - 1] -= e; s.spillR += e * COL; }
     }
   }
+  // falling snow chunks get room above the flake limit, so a heavy snowfall never swallows them
   function chunk(x, y, vx, vy, m) {
-    if (parts.length >= MAXP) return;
+    if (parts.length >= MAXP + 1200) return;
     parts.push({ x, y, vx, vy, m, r: clamp(Math.sqrt(m / Math.PI) * rand(0.7, 1.3), 1, 3.6), kind: 1, a: 1 });
   }
+  // knocks a fraction of the drift off as falling chunks; small amounts from neighbouring columns
+  // are gathered into one chunk, so even a light shake shows snow falling instead of vanishing
   function shed(s, frac, vx, vy) {
-    for (let i = 0; i < s.n; i += 2) {
-      let m = 0, hmax = 0;
-      for (let k = i; k < Math.min(i + 2, s.n); k++) { const t = s.h[k] * frac; s.h[k] -= t; m += t * COL; hmax = Math.max(hmax, s.h[k]); }
-      if (m > 0.5) chunk(s.left + i * COL + COL, s.top - hmax - 1 - rand(2), vx + rand(-30, 30), vy - rand(30));
+    let acc = 0, hmax = 0;
+    for (let i = 0; i < s.n; i++) {
+      const t = s.h[i] * frac;
+      s.h[i] -= t; acc += t * COL; hmax = Math.max(hmax, s.h[i]);
+      if (acc >= 1.5 || (i === s.n - 1 && acc > 0.3)) {
+        chunk(s.left + i * COL + COL / 2, s.top - hmax - 1 - rand(2), vx + rand(-30, 30), vy - rand(30), acc);
+        acc = 0; hmax = 0;
+      }
     }
   }
 
