@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
   <canvas id="sky" aria-hidden="true"></canvas>
@@ -59,35 +59,6 @@
         <img draggable="false" src="assets/tems-hero.png" alt="Темс со снежком в руке" width="560" height="560">
         <span class="tems-hint">Кликни меня!</span>
       </button>
-    </div>
-  </section>
-
-  <section id="look" class="look">
-    <div class="section-head">
-      <h2>Как это выглядит</h2>
-      <p>Настоящий рабочий стол Windows с запущенным Snowie.</p>
-    </div>
-    <div class="look-grid">
-      <figure>
-        <video src="assets/media/snow.mp4" poster="assets/media/snow.jpg" autoplay muted loop playsinline preload="metadata"></video>
-        <figcaption>Сугробы на окнах: едут вместе с окном и слетают, если его потрясти</figcaption>
-      </figure>
-      <figure>
-        <video src="assets/media/snowball.mp4" poster="assets/media/snowball.jpg" autoplay muted loop playsinline preload="metadata"></video>
-        <figcaption>Снежок катается по сугробу, растёт и летит в окно</figcaption>
-      </figure>
-      <figure>
-        <video src="assets/media/build.mp4" poster="assets/media/build.jpg" autoplay muted loop playsinline preload="metadata"></video>
-        <figcaption>Три снежка друг на друге — и получается снеговик</figcaption>
-      </figure>
-      <figure>
-        <video src="assets/media/fireworks.mp4" poster="assets/media/fireworks.jpg" autoplay muted loop playsinline preload="metadata"></video>
-        <figcaption>В полночь — отсчёт, салют и «С Новым годом!»</figcaption>
-      </figure>
-      <figure class="wide">
-        <video src="assets/media/plow.mp4" poster="assets/media/plow.jpg" autoplay muted loop playsinline preload="metadata"></video>
-        <figcaption>Снегоуборщик расчищает сугроб на панели задач и объезжает снеговиков</figcaption>
-      </figure>
     </div>
   </section>
 
@@ -158,28 +129,35 @@
         <div>
           <h3>Снежки</h3>
           <p>Возьмите снег мышкой и покрутите курсором по кругу — комок скатается в шар. Над сугробом шар растёт без ограничений, но чем он больше, тем тяжелее его тянуть. Брошенный снежок разбивается об окно и оставляет след, который сползает и тает.</p>
+          <video class="clip" src="assets/media/snowball.mp4" poster="assets/media/snowball.jpg" autoplay muted loop playsinline preload="metadata"></video>
         </div>
       </article>
       <article class="card wide rev">
         <img draggable="false" src="assets/tems-snowman.png" alt="Темс лепит снеговика" loading="lazy" width="260" height="260">
         <div>
           <h3>Снеговики</h3>
-          <p>Положите три шара друг на друга — получится снеговик в шляпе, с шарфом, носом-морковкой и руками-веточками. Шар остаётся, только если лёг ровно сверху; иначе соскользнёт. Сильным броском снеговика можно разбить.</p>
+          <p>Положите три шара друг на друга — получится снеговик в шляпе, с шарфом, носом-морковкой и руками-веточками. Шар остаётся, только если лёг ровно сверху; иначе соскользнёт. Сильным броском снеговика можно разбить. А за нижний шар его можно перенести на другое окно.</p>
+          <video class="clip" src="assets/media/build.mp4" poster="assets/media/build.jpg" autoplay muted loop playsinline preload="metadata"></video>
         </div>
       </article>
-      <article class="card">
-        <h3>Живые сугробы</h3>
-        <p>Снег копится на верхних краях окон и на панели задач, осыпается по углу откоса и свешивается с краёв. Сугроб едет вместе с окном, а если окно потрясти — слетает. Двигаете окно — оно сгребает снег с соседних окон, как отвал.</p>
+      <article class="card media">
+        <div>
+          <h3>Живые сугробы</h3>
+          <p>Снег копится на верхних краях окон и на панели задач, осыпается по углу откоса и свешивается с краёв. Сугроб едет вместе с окном, а если окно потрясти — слетает. Двигаете окно — оно сгребает снег с соседних окон, как отвал.</p>
+        </div>
+        <video class="clip" src="assets/media/snow.mp4" poster="assets/media/snow.jpg" autoplay muted loop playsinline preload="metadata"></video>
       </article>
-      <article class="card">
+      <article class="card full">
         <h3>Снегоуборщик</h3>
         <p>Раз в несколько минут по панели задач проезжает маленький снегоуборщик с мигалкой и расчищает дорогу. Снеговиков он объезжает.</p>
+        <video class="clip strip" src="assets/media/plow.mp4" poster="assets/media/plow.jpg" autoplay muted loop playsinline preload="metadata"></video>
       </article>
       <article class="card wide">
         <img draggable="false" src="assets/tems-sparkler.png" alt="Темс с бенгальским огнём" loading="lazy" width="260" height="260">
         <div>
           <h3>Новогодний салют</h3>
           <p>Коробка с фейерверками на панели задач считает время до Нового года. В полночь — три минуты салюта и поздравление. Можно поставить свои таймеры, а щелчок по коробке запускает салют сразу.</p>
+          <video class="clip" src="assets/media/fireworks.mp4" poster="assets/media/fireworks.jpg" autoplay muted loop playsinline preload="metadata"></video>
         </div>
       </article>
       <article class="card">
